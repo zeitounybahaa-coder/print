@@ -94,7 +94,7 @@ const DPMM = 8;                                             // 203 dpi = 8 dots/
 const qs   = new URLSearchParams(location.search);
 const CUR  = qs.get('cur') || '$';
 const W_MM = +(qs.get('w') || 76);
-const H_MM = +(qs.get('h') || 25);
+const H_MM = +(qs.get('h') || 38);
 const GAP  = (qs.get('media') || 'gap') === 'gap';          // die-cut labels vs continuous
 const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print width = 576 dots
 const LL   = Math.round(H_MM * DPMM);
@@ -150,28 +150,31 @@ function barcodeZpl(x, y, val, h){
   return `^FO${x},${y}^BY2,2.5,${h}^BCN,${h},Y,N,N^FD${v}^FS`;                // Code 128 — takes anything
 }
 
-/* Layout, 576 x 200 dots (72 x 25 mm printable):
-     y   4- 24  code | category      (small)
-     y  24- 54  item name           (bold-ish, full width)
-     y  60-134  barcode + human-readable digits (full width, so long SKUs still fit)
-     y 138-194  price               (large, bottom-right — reads like a shelf label)
-     y 150-190  package unit/price  (small, bottom-left)                              */
+/* Layout for 76 x 38 mm (576 x 304 dots @ 203 dpi).
+   ^POI: the ZQ320 feeds bottom-first, so invert 180° to read upright when peeled.
+   All content stays inside a safe margin so the flip never clips an edge.
+     y  10- 32  code | category   (small, top strip)
+     y  34-100  item name         (up to 2 lines, full width)
+     y 108-200  barcode + human-readable digits
+     y 206-264  price (large, right)  +  package unit/price (small, left)            */
 function labelZpl(it){
   const head  = [esc(it.code), esc(it.cat)].filter(Boolean).join('  |  ');
   const price = money(it.price);
   const pkg   = [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ');
+  const M = 24, W = PW - 2 * M;                    // safe left/right margin + usable width
 
   return [
     '^XA',
-    '^CI28',                                      // UTF-8 in
+    '^CI28',                                       // UTF-8 in
     `^PW${PW}`, `^LL${LL}`, '^LH0,0', '^LT0', '^MTD',
-    GAP ? '^MNY' : '^MNN',                        // gap sensing for die-cut label stock
-    head  ? `^FO8,4^A0N,20,20^FB${PW - 16},1,0,L^FD${head}^FS` : '',
-    `^FO8,24^A0N,30,30^FB${PW - 16},1,0,L^FD${esc(it.name)}^FS`,
-    barcodeZpl(8, 60, it.barcode, 52),            // full width — never collides with the price
-    pkg   ? `^FO8,150^A0N,20,20^FB260,2,2,L^FD${pkg}^FS` : '',
-    price ? `^FO288,138^A0N,56,56^FB${PW - 296},1,0,R^FD${price}^FS` : '',
-    `^PQ${it.qty}`,                               // qty copies, printed by the printer itself
+    '^POI',                                        // invert — matches the ZQ320's feed direction
+    GAP ? '^MNY' : '^MNN',                         // gap sensing for die-cut label stock
+    head  ? `^FO${M},10^A0N,22,22^FB${W},1,0,L^FD${head}^FS` : '',
+    `^FO${M},34^A0N,32,32^FB${W},2,2,L^FD${esc(it.name)}^FS`,
+    barcodeZpl(M + 16, 108, it.barcode, 66),
+    pkg   ? `^FO${M},214^A0N,22,22^FB300,2,2,L^FD${pkg}^FS` : '',
+    price ? `^FO${M},206^A0N,58,58^FB${W},1,0,R^FD${price}^FS` : '',
+    `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
   ].filter(Boolean).join('\n');
 }
