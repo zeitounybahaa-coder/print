@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sticker Print — ZQ320</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#191c23; --line:#2a2f3a; --txt:#e7e9ee;
+    --dim:#9aa3b2; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  body{margin:0; background:var(--bg); color:var(--txt);
+       font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       padding:14px 14px 120px; }
+  h1{font-size:18px; margin:0 0 2px}
+  .sub{color:var(--dim); font-size:13px; margin-bottom:14px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px;
+        padding:12px; margin-bottom:12px}
+  .row{display:flex; align-items:center; gap:10px}
+  .grow{flex:1; min-width:0}
+  .name{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .meta{color:var(--dim); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .price{font-weight:700; font-size:18px; white-space:nowrap}
+  .qty{background:#232833; border:1px solid var(--line); border-radius:8px;
+       padding:4px 10px; font-variant-numeric:tabular-nums; font-size:14px; color:var(--dim)}
+  .qty b{color:var(--txt); font-size:16px}
+  button{font:inherit; color:#fff; border:0; border-radius:10px; padding:12px 16px;
+         background:#2a2f3a; cursor:pointer}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  .primary{background:var(--accent); font-weight:600; width:100%; padding:16px; font-size:17px}
+  .ghost{background:transparent; border:1px solid var(--line); color:var(--dim); padding:8px 12px; font-size:13px}
+  .bar{position:fixed; left:0; right:0; bottom:0; padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+       background:linear-gradient(to top,var(--bg) 70%,transparent); }
+  .status{display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:8px; color:var(--dim)}
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--dim); flex:none}
+  .dot.ok{background:var(--ok)} .dot.busy{background:var(--warn)} .dot.bad{background:var(--bad)}
+  .empty{color:var(--dim); text-align:center; padding:34px 10px}
+  pre{white-space:pre-wrap; word-break:break-all; background:#0b0d11; border:1px solid var(--line);
+      border-radius:8px; padding:10px; font-size:11px; color:#8fd0a0; max-height:240px; overflow:auto}
+  details{margin-top:6px} summary{color:var(--dim); font-size:13px; cursor:pointer; padding:6px 0}
+  .tools{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+  input[type=text]{width:100%; background:#0b0d11; border:1px solid var(--line); color:var(--txt);
+                   border-radius:8px; padding:9px; font-size:13px; margin-top:6px}
+  label.f{font-size:12px; color:var(--dim)}
+</style>
+</head>
+<body>
+
+<h1>Sticker Print</h1>
+<div class="sub" id="sub">Zebra ZQ320 · 76 × 25 mm · 203 dpi</div>
+
+<div id="list"></div>
+
+<details>
+  <summary>Advanced / troubleshooting</summary>
+  <div class="card">
+    <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
+    <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
+    <div class="tools">
+      <button class="ghost" id="btnDiag">Inspect printer services</button>
+      <button class="ghost" id="btnZpl">Show ZPL</button>
+      <button class="ghost" id="btnCopy">Copy ZPL</button>
+      <button class="ghost" id="btnForget">Forget printer</button>
+    </div>
+    <pre id="log" style="display:none"></pre>
+  </div>
+</details>
+
+<div class="bar">
+  <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
+  <button class="primary" id="btnPrint">Print</button>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+   Sticker print page for Zebra ZQ320 (3", 203 dpi) over Web Bluetooth.
+
+   AppSheet sends everything in the URL fragment — this page never talks
+   to a server, so there is no cold start and no Sheet read.
+
+   URL shape:
+     labels.html?cur=$&w=76&h=25#d=<encoded>
+
+     <encoded> = URL-encoded list of records separated by "~"
+                 each record = fields separated by "|"
+                 name | barcode | price | code | category | pkgPrice | pkgUnit | qty
+------------------------------------------------------------------- */
+
+const ZEBRA_WRITE = '38eb4a82-c570-11e3-9507-0002a5d5c51b'; // write-to-printer
+const ZEBRA_READ  = '38eb4a81-c570-11e3-9507-0002a5d5c51b'; // read-from-printer (keeps link alive)
+const DPMM = 8;                                             // 203 dpi = 8 dots/mm
+
+const qs   = new URLSearchParams(location.search);
+const CUR  = qs.get('cur') || '$';
+const W_MM = +(qs.get('w') || 76);
+const H_MM = +(qs.get('h') || 25);
+const GAP  = (qs.get('media') || 'gap') === 'gap';          // die-cut labels vs continuous
+const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print width = 576 dots
+const LL   = Math.round(H_MM * DPMM);
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+
+let items = [], device = null, chWrite = null, chRead = null;
+
+/* ---------- parse the payload ---------- */
+function parse(){
+  const raw = decodeURIComponent((location.hash.replace(/^#/, '').match(/(?:^|&)d=([^&]*)/) || [,''])[1] || '');
+  if (!raw.trim()) return [];
+  return raw.split('~').map(r => r.split('|')).filter(f => f.length && f[0].trim()).map(f => ({
+    name:     (f[0] || '').trim(),
+    barcode:  (f[1] || '').trim(),
+    price:    (f[2] || '').trim(),
+    code:     (f[3] || '').trim(),
+    cat:      (f[4] || '').trim(),
+    pkgPrice: (f[5] || '').trim(),
+    pkgUnit:  (f[6] || '').trim(),
+    qty:      Math.max(1, Math.min(999, parseInt(f[7], 10) || 1))
+  }));
+}
+
+/* ---------- ZPL ---------- */
+const esc = s => String(s == null ? '' : s).replace(/[\^~\\]/g, ' ').replace(/\s+/g, ' ').trim();
+
+const money = v => {
+  const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? '' : CUR + n.toFixed(2);
+};
+
+// EAN-13 / UPC-A checksum: sum with alternating 1/3 weights must be divisible by 10.
+function checkOK(d){
+  let s = 0;
+  for (let i = 0; i < d.length - 1; i++){
+    const w = (d.length === 13) ? (i % 2 ? 3 : 1) : (i % 2 ? 1 : 3);
+    s += (+d[i]) * w;
+  }
+  return ((10 - (s % 10)) % 10) === +d[d.length - 1];
+}
+
+// Let the printer draw the barcode natively — sharper than any image, and it scans.
+// EAN-13/UPC-A print their guard digits OUTSIDE the bars, so they need a left margin
+// or the first digit gets clipped off the edge of the label.
+function barcodeZpl(x, y, val, h){
+  const v = esc(val);
+  if (!v) return '';
+  const numeric = /^\d+$/.test(v);
+  if (numeric && v.length === 13 && checkOK(v)) return `^FO${x + 20},${y}^BY2,2.5,${h}^BEN,${h},Y,N^FD${v}^FS`;
+  if (numeric && v.length === 12 && checkOK(v)) return `^FO${x + 20},${y}^BY2,2.5,${h}^BUN,${h},Y,N,Y^FD${v}^FS`;
+  return `^FO${x},${y}^BY2,2.5,${h}^BCN,${h},Y,N,N^FD${v}^FS`;                // Code 128 — takes anything
+}
+
+/* Layout, 576 x 200 dots (72 x 25 mm printable):
+     y   4- 24  code | category      (small)
+     y  24- 54  item name           (bold-ish, full width)
+     y  60-134  barcode + human-readable digits (full width, so long SKUs still fit)
+     y 138-194  price               (large, bottom-right — reads like a shelf label)
+     y 150-190  package unit/price  (small, bottom-left)                              */
+function labelZpl(it){
+  const head  = [esc(it.code), esc(it.cat)].filter(Boolean).join('  |  ');
+  const price = money(it.price);
+  const pkg   = [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ');
+
+  return [
+    '^XA',
+    '^CI28',                                      // UTF-8 in
+    `^PW${PW}`, `^LL${LL}`, '^LH0,0', '^LT0', '^MTD',
+    GAP ? '^MNY' : '^MNN',                        // gap sensing for die-cut label stock
+    head  ? `^FO8,4^A0N,20,20^FB${PW - 16},1,0,L^FD${head}^FS` : '',
+    `^FO8,24^A0N,30,30^FB${PW - 16},1,0,L^FD${esc(it.name)}^FS`,
+    barcodeZpl(8, 60, it.barcode, 52),            // full width — never collides with the price
+    pkg   ? `^FO8,150^A0N,20,20^FB260,2,2,L^FD${pkg}^FS` : '',
+    price ? `^FO288,138^A0N,56,56^FB${PW - 296},1,0,R^FD${price}^FS` : '',
+    `^PQ${it.qty}`,                               // qty copies, printed by the printer itself
+    '^XZ'
+  ].filter(Boolean).join('\n');
+}
+
+const allZpl = () => items.map(labelZpl).join('\n');
+
+/* ---------- UI ---------- */
+function setStatus(text, cls){
+  $('msg').textContent = text;
+  $('dot').className = 'dot' + (cls ? ' ' + cls : '');
+}
+
+function render(){
+  const list = $('list');
+  if (!items.length){
+    list.innerHTML = '<div class="card empty">Nothing in the queue.<br>Add products in the app, then tap Print Labels.</div>';
+    $('btnPrint').disabled = true;
+    return;
+  }
+  list.innerHTML = items.map(it => `
+    <div class="card"><div class="row">
+      <div class="grow">
+        <div class="name">${escHtml(it.name)}</div>
+        <div class="meta">${escHtml([it.code, it.cat, it.barcode].filter(Boolean).join(' · ')) || '&nbsp;'}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="price">${escHtml(money(it.price))}</div>
+        <div class="qty">×<b>${it.qty}</b></div>
+      </div>
+    </div></div>`).join('');
+  const total = items.reduce((s, i) => s + i.qty, 0);
+  $('sub').textContent = `Zebra ZQ320 · ${W_MM}×${H_MM} mm · ${items.length} product${items.length > 1 ? 's' : ''}, ${total} sticker${total > 1 ? 's' : ''}`;
+  $('btnPrint').textContent = `Print ${total} sticker${total > 1 ? 's' : ''}`;
+}
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function say(t){ logEl.style.display = 'block'; logEl.textContent += t + '\n'; }
+
+/* ---------- Bluetooth ---------- */
+async function connect(){
+  if (!navigator.bluetooth) throw new Error('This browser has no Bluetooth. Use Chrome on Android.');
+  const SVC = $('svc').value.trim().toLowerCase();
+
+  if (device && device.gatt.connected && chWrite) return;
+
+  // Reuse a previously granted printer so there's no chooser on every print.
+  if (!device && navigator.bluetooth.getDevices){
+    try {
+      const known = await navigator.bluetooth.getDevices();
+      const saved = localStorage.getItem('zq320.id');
+      device = known.find(d => d.id === saved) || null;
+    } catch(e){ /* permissions backend not enabled — fall through to the chooser */ }
+  }
+
+  if (!device){
+    setStatus('Choose your printer…', 'busy');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SVC] }, { namePrefix: 'ZQ' }, { namePrefix: 'XX' }],
+      optionalServices: [SVC]
+    });
+    try { localStorage.setItem('zq320.id', device.id); } catch(e){}
+  }
+
+  setStatus('Connecting…', 'busy');
+  const gatt = await device.gatt.connect();
+  const svc  = await gatt.getPrimaryService(SVC);
+  chWrite    = await svc.getCharacteristic(ZEBRA_WRITE);
+  try { chRead = await svc.getCharacteristic(ZEBRA_READ); } catch(e){ chRead = null; }
+
+  // Zebra's own note: reading from the printer keeps the BLE link from dropping.
+  if (chRead){ try { await chRead.readValue(); } catch(e){} }
+
+  device.addEventListener('gattserverdisconnected', () => {
+    chWrite = null; setStatus('Printer disconnected', 'bad');
+  });
+  setStatus('Connected to ' + (device.name || 'printer'), 'ok');
+}
+
+async function send(text){
+  const bytes = new TextEncoder().encode(text);
+  const CHUNK = 20;                                  // BLE default MTU — chunk, as Zebra advises
+  const withoutResp = typeof chWrite.writeValueWithoutResponse === 'function';
+  for (let i = 0; i < bytes.length; i += CHUNK){
+    const slice = bytes.slice(i, i + CHUNK);
+    withoutResp ? await chWrite.writeValueWithoutResponse(slice)
+                : await chWrite.writeValue(slice);
+    if (chRead && i % (CHUNK * 40) === 0){ try { await chRead.readValue(); } catch(e){} }
+    setStatus(`Sending… ${Math.round((i / bytes.length) * 100)}%`, 'busy');
+  }
+}
+
+$('btnPrint').onclick = async () => {
+  $('btnPrint').disabled = true;
+  try {
+    await connect();
+    await send(allZpl());
+    const n = items.reduce((s, i) => s + i.qty, 0);
+    setStatus(`Sent ${n} sticker${n > 1 ? 's' : ''} to the printer`, 'ok');
+  } catch (e){
+    setStatus(e.message || String(e), 'bad');
+    say('ERROR: ' + (e.message || e));
+  }
+  $('btnPrint').disabled = false;
+};
+
+/* Ask the printer what it actually offers — beats guessing at UUIDs. */
+$('btnDiag').onclick = async () => {
+  logEl.style.display = 'block'; logEl.textContent = '';
+  try {
+    const SVC = $('svc').value.trim().toLowerCase();
+    const d = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [SVC] });
+    say('Device: ' + (d.name || '(no name)') + '  id=' + d.id);
+    const g = await d.gatt.connect();
+    const services = await g.getPrimaryServices();
+    if (!services.length) say('No services readable. The UUID above is probably wrong.');
+    for (const s of services){
+      say('service ' + s.uuid);
+      for (const c of await s.getCharacteristics()){
+        const p = Object.entries(c.properties).filter(([, v]) => v).map(([k]) => k).join(',');
+        say('   char ' + c.uuid + '  [' + p + ']');
+      }
+    }
+    say('\nUse the characteristic with "write" for printing.');
+  } catch(e){ say('ERROR: ' + (e.message || e)); }
+};
+
+$('btnZpl').onclick   = () => { logEl.style.display = 'block'; logEl.textContent = allZpl(); };
+$('btnCopy').onclick  = async () => { try { await navigator.clipboard.writeText(allZpl()); setStatus('ZPL copied', 'ok'); } catch(e){} };
+$('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); device = null; chWrite = null; setStatus('Printer forgotten — next print will ask again'); };
+
+/* ---------- go ---------- */
+items = parse();
+render();
+if (!navigator.bluetooth) setStatus('No Bluetooth in this browser — open in Chrome on Android', 'bad');
+</script>
+</body>
+</html>
