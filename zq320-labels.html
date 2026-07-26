@@ -58,6 +58,7 @@
     <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
     <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
     <div class="tools">
+      <button class="ghost" id="btnCal">Calibrate printer</button>
       <button class="ghost" id="btnDiag">Inspect printer services</button>
       <button class="ghost" id="btnZpl">Show ZPL</button>
       <button class="ghost" id="btnCopy">Copy ZPL</button>
@@ -163,17 +164,21 @@ function labelZpl(it){
   const pkg   = [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ');
   const M = 24, W = PW - 2 * M;                    // safe left/right margin + usable width
 
+  // No ^LL: the printer uses its own calibrated label length, so content fits
+  // any label the printer has measured (tap "Calibrate printer" once first).
+  // Everything is kept inside ~216 dots and away from the edges so the 180°
+  // flip (^POI) never clips, whatever the true label length turns out to be.
   return [
     '^XA',
     '^CI28',                                       // UTF-8 in
-    `^PW${PW}`, `^LL${LL}`, '^LH0,0', '^LT0', '^MTD',
+    `^PW${PW}`, '^LH0,0', '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
     GAP ? '^MNY' : '^MNN',                         // gap sensing for die-cut label stock
-    head  ? `^FO${M},10^A0N,22,22^FB${W},1,0,L^FD${head}^FS` : '',
-    `^FO${M},34^A0N,32,32^FB${W},2,2,L^FD${esc(it.name)}^FS`,
-    barcodeZpl(M + 16, 108, it.barcode, 66),
-    pkg   ? `^FO${M},214^A0N,22,22^FB300,2,2,L^FD${pkg}^FS` : '',
-    price ? `^FO${M},206^A0N,58,58^FB${W},1,0,R^FD${price}^FS` : '',
+    head  ? `^FO${M},10^A0N,20,20^FB${W},1,0,L^FD${head}^FS` : '',
+    `^FO${M},34^A0N,30,30^FB${W},2,2,L^FD${esc(it.name)}^FS`,
+    barcodeZpl(M + 16, 98, it.barcode, 52),
+    pkg   ? `^FO${M},176^A0N,20,20^FB300,1,0,L^FD${pkg}^FS` : '',
+    price ? `^FO${M},166^A0N,48,48^FB${W},1,0,R^FD${price}^FS` : '',
     `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
   ].filter(Boolean).join('\n');
@@ -299,6 +304,17 @@ $('btnDiag').onclick = async () => {
     }
     say('\nUse the characteristic with "write" for printing.');
   } catch(e){ say('ERROR: ' + (e.message || e)); }
+};
+
+/* One-time media calibration — the printer feeds and measures the label + gap,
+   which stops the extra blank labels and fixes top-of-form. */
+$('btnCal').onclick = async () => {
+  try {
+    setStatus('Calibrating… printer will feed a label', 'busy');
+    await connect();
+    await send('! U1 do "device.calibrate"\r\n');
+    setStatus('Calibration sent — done in a moment', 'ok');
+  } catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
 };
 
 $('btnZpl').onclick   = () => { logEl.style.display = 'block'; logEl.textContent = allZpl(); };
