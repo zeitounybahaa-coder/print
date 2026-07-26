@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Payment Receipt — ZQ320</title>
+<style>
+  :root{ --bg:#0f1115; --card:#191c23; --line:#2a2f3a; --txt:#e7e9ee; --dim:#9aa3b2;
+         --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  body{margin:0; background:var(--bg); color:var(--txt);
+       font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; padding:14px 14px 120px}
+  h1{font-size:18px; margin:0 0 2px}
+  .sub{color:var(--dim); font-size:13px; margin-bottom:14px}
+  .rc{background:#fff; color:#111; border-radius:12px; padding:16px; max-width:360px; margin:0 auto 12px; font-variant-numeric:tabular-nums}
+  .rc .h{text-align:center; font-weight:700; letter-spacing:1px}
+  .rc .inv{text-align:center; font-size:13px; color:#444; margin:2px 0 10px}
+  .rc hr{border:0; border-top:1px dashed #bbb; margin:8px 0}
+  .rc .r{display:flex; justify-content:space-between; font-size:13px; margin:3px 0}
+  .rc .r .k{color:#555}
+  .rc .amt{display:flex; justify-content:space-between; font-weight:700; font-size:20px; margin:8px 0}
+  .rc .ft{text-align:center; font-size:11px; color:#777; margin-top:12px}
+  button{font:inherit; color:#fff; border:0; border-radius:10px; padding:12px 16px; background:#2a2f3a; cursor:pointer}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  .primary{background:var(--accent); font-weight:600; width:100%; padding:16px; font-size:17px}
+  .ghost{background:transparent; border:1px solid var(--line); color:var(--dim); padding:8px 12px; font-size:13px}
+  .bar{position:fixed; left:0; right:0; bottom:0; padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+       background:linear-gradient(to top,var(--bg) 70%,transparent)}
+  .status{display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:8px; color:var(--dim)}
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--dim); flex:none}
+  .dot.ok{background:var(--ok)} .dot.busy{background:var(--warn)} .dot.bad{background:var(--bad)}
+  .empty{color:var(--dim); text-align:center; padding:34px 10px}
+  pre{white-space:pre-wrap; word-break:break-all; background:#0b0d11; border:1px solid var(--line);
+      border-radius:8px; padding:10px; font-size:11px; color:#8fd0a0; max-height:240px; overflow:auto}
+  details{margin-top:6px} summary{color:var(--dim); font-size:13px; cursor:pointer; padding:6px 0}
+  .tools{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+  input[type=text]{width:100%; background:#0b0d11; border:1px solid var(--line); color:var(--txt);
+                   border-radius:8px; padding:9px; font-size:13px; margin-top:6px}
+  label.f{font-size:12px; color:var(--dim)}
+</style>
+</head>
+<body>
+
+<h1>Payment Receipt</h1>
+<div class="sub" id="sub">Zebra ZQ320 · 72 mm thermal</div>
+
+<div id="view"></div>
+
+<details>
+  <summary>Advanced / troubleshooting</summary>
+  <div style="background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px">
+    <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
+    <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
+    <div class="tools">
+      <button class="ghost" id="btnCal">Calibrate printer</button>
+      <button class="ghost" id="btnDiag">Inspect printer services</button>
+      <button class="ghost" id="btnZpl">Show ZPL</button>
+      <button class="ghost" id="btnForget">Forget printer</button>
+    </div>
+    <pre id="log" style="display:none"></pre>
+  </div>
+</details>
+
+<div class="bar">
+  <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
+  <button class="primary" id="btnPrint">Print receipt</button>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+   Cash-collection (payment) slip for Zebra ZQ320 (72 mm) over Web Bluetooth.
+   URL fragment:  #d=<fields> (| separated):
+     0 receiptNo | 1 date | 2 client | 3 collectedBy | 4 invoice
+     | 5 amount | 6 prevBalance | 7 remBalance | 8 phone
+------------------------------------------------------------------- */
+const ZEBRA_WRITE = '38eb4a82-c570-11e3-9507-0002a5d5c51b';
+const ZEBRA_READ  = '38eb4a81-c570-11e3-9507-0002a5d5c51b';
+const DPMM = 8;
+const qs = new URLSearchParams(location.search);
+const CUR = qs.get('cur') || '$';
+const PW = Math.min(Math.round((+(qs.get('w') || 72)) * DPMM), 576);
+const PHONE_DEFAULT = '+231 777 940 000';
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+let d = null, device = null, chWrite = null, chRead = null;
+
+function parse(){
+  const raw = decodeURIComponent((location.hash.replace(/^#/, '').match(/(?:^|&)d=([^&]*)/) || [,''])[1] || '');
+  if (!raw.trim()) return;
+  const f = raw.split('|');
+  d = {
+    receiptNo:(f[0]||'').trim(), date:(f[1]||'').trim(), client:(f[2]||'').trim(),
+    collectedBy:(f[3]||'').trim(), invoice:(f[4]||'').trim(), amount:(f[5]||'').trim(),
+    prevBalance:(f[6]||'').trim(), remBalance:(f[7]||'').trim(), phone:(f[8]||'').trim() || PHONE_DEFAULT
+  };
+}
+
+const esc = s => String(s == null ? '' : s).replace(/[\^~\\]/g, ' ').replace(/\s+/g, ' ').trim();
+const money = v => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? '' : CUR + n.toFixed(2); };
+const escHtml = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function slipZpl(){
+  if (!d) return '';
+  const M = 20, W = PW - 2 * M;
+  const L = [];
+  let y = 24;
+  const ctr = (sz, v) => { L.push(`^FO${M},${y}^A0N,${sz},${sz}^FB${W},1,0,C^FD${esc(v)}^FS`); };
+  const rule = () => { L.push(`^FO${M},${y}^GB${W},2,2^FS`); y += 16; };
+  const kv = (k, v, sz) => { sz = sz || 26;
+    L.push(`^FO${M},${y}^A0N,${sz},${sz}^FD${esc(k)}^FS`);
+    L.push(`^FO${M},${y}^A0N,${sz},${sz}^FB${W},1,0,R^FD${esc(v)}^FS`);
+    y += sz + 8; };
+
+  ctr(42, 'PAYMENT RECEIPT'); y += 48;
+  ctr(28, d.receiptNo);       y += 40;
+  rule();
+  kv('Date', d.date);
+  kv('Client', d.client);
+  kv('Received By', d.collectedBy);
+  if (d.invoice) kv('For invoice', d.invoice);
+  y += 4; rule();
+  L.push(`^FO${M},${y}^A0N,30,30^FDAmount paid^FS`);
+  L.push(`^FO${M},${y}^A0N,44,44^FB${W},1,0,R^FD${esc(money(d.amount))}^FS`);
+  y += 56;
+  y += 6; rule();
+  if (d.prevBalance !== '') kv('Previous balance', money(d.prevBalance));
+  if (d.remBalance  !== '') kv('Remaining balance', money(d.remBalance), 30);
+  y += 12;
+  ctr(22, 'Thank you for your payment!'); y += 30;
+  ctr(20, 'Powered by Tradelink Liberia'); y += 26;
+  ctr(20, d.phone);                        y += 40;
+
+  const LL = y + 24;
+  return ['^XA','^CI28',`^PW${PW}`,`^LL${LL}`,'^LH0,0','^LT0','^MTD','^POI','^MNN', ...L, '^PQ1','^XZ'].join('\n');
+}
+
+function render(){
+  const v = $('view');
+  if (!d){ v.innerHTML = '<div class="rc empty">No payment data. Open this from the Print Collection button in the app.</div>'; $('btnPrint').disabled = true; return; }
+  const rows = [['Date',d.date],['Client',d.client],['Received By',d.collectedBy]]
+    .concat(d.invoice ? [['For invoice',d.invoice]] : [])
+    .map(([k,x]) => `<div class="r"><span class="k">${escHtml(k)}</span><span>${escHtml(x)}</span></div>`).join('');
+  const bal = [].concat(d.prevBalance!=='' ? [['Previous balance',money(d.prevBalance)]] : [])
+                .concat(d.remBalance!=='' ? [['Remaining balance',money(d.remBalance)]] : [])
+    .map(([k,x]) => `<div class="r"><span class="k">${escHtml(k)}</span><span>${escHtml(x)}</span></div>`).join('');
+  v.innerHTML = `<div class="rc">
+    <div class="h">PAYMENT RECEIPT</div>
+    <div class="inv">${escHtml(d.receiptNo)}</div>
+    <hr>${rows}<hr>
+    <div class="amt"><span>Amount paid</span><span>${escHtml(money(d.amount))}</span></div>
+    <hr>${bal}
+    <div class="ft">Thank you for your payment!<br>Powered by Tradelink Liberia · ${escHtml(d.phone)}</div>
+  </div>`;
+}
+
+function setStatus(t, cls){ $('msg').textContent = t; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
+function say(t){ logEl.style.display = 'block'; logEl.textContent += t + '\n'; }
+
+async function connect(){
+  if (!navigator.bluetooth) throw new Error('This browser has no Bluetooth. Use Chrome on Android.');
+  const SVC = $('svc').value.trim().toLowerCase();
+  if (device && device.gatt.connected && chWrite) return;
+  if (!device && navigator.bluetooth.getDevices){
+    try { const known = await navigator.bluetooth.getDevices(); const saved = localStorage.getItem('zq320.id'); device = known.find(x => x.id === saved) || null; } catch(e){}
+  }
+  if (!device){
+    setStatus('Choose your printer…', 'busy');
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }, { namePrefix: 'ZQ' }, { namePrefix: 'XX' }], optionalServices: [SVC] });
+    try { localStorage.setItem('zq320.id', device.id); } catch(e){}
+  }
+  setStatus('Connecting…', 'busy');
+  const gatt = await device.gatt.connect();
+  const svc = await gatt.getPrimaryService(SVC);
+  chWrite = await svc.getCharacteristic(ZEBRA_WRITE);
+  try { chRead = await svc.getCharacteristic(ZEBRA_READ); } catch(e){ chRead = null; }
+  if (chRead){ try { await chRead.readValue(); } catch(e){} }
+  device.addEventListener('gattserverdisconnected', () => { chWrite = null; setStatus('Printer disconnected', 'bad'); });
+  setStatus('Connected to ' + (device.name || 'printer'), 'ok');
+}
+async function send(text){
+  const bytes = new TextEncoder().encode(text);
+  const CHUNK = 20;
+  const noResp = typeof chWrite.writeValueWithoutResponse === 'function';
+  for (let i = 0; i < bytes.length; i += CHUNK){
+    const slice = bytes.slice(i, i + CHUNK);
+    noResp ? await chWrite.writeValueWithoutResponse(slice) : await chWrite.writeValue(slice);
+    if (chRead && i % (CHUNK * 40) === 0){ try { await chRead.readValue(); } catch(e){} }
+    setStatus(`Sending… ${Math.round((i / bytes.length) * 100)}%`, 'busy');
+  }
+}
+$('btnPrint').onclick = async () => {
+  $('btnPrint').disabled = true;
+  try { await connect(); await send(slipZpl()); setStatus('Receipt sent to the printer', 'ok'); }
+  catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
+  $('btnPrint').disabled = false;
+};
+$('btnCal').onclick = async () => {
+  try { setStatus('Calibrating… printer will feed', 'busy'); await connect(); await send('! U1 do "device.calibrate"\r\n'); setStatus('Calibration sent', 'ok'); }
+  catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
+};
+$('btnDiag').onclick = async () => {
+  logEl.style.display='block'; logEl.textContent='';
+  try { const SVC=$('svc').value.trim().toLowerCase();
+    const dv=await navigator.bluetooth.requestDevice({acceptAllDevices:true, optionalServices:[SVC]});
+    say('Device: '+(dv.name||'(no name)')); const g=await dv.gatt.connect();
+    for(const s of await g.getPrimaryServices()){ say('service '+s.uuid); for(const c of await s.getCharacteristics()){ say('   char '+c.uuid+' ['+Object.entries(c.properties).filter(([,v])=>v).map(([k])=>k).join(',')+']'); } }
+  } catch(e){ say('ERROR: '+(e.message||e)); }
+};
+$('btnZpl').onclick  = () => { logEl.style.display='block'; logEl.textContent = slipZpl(); };
+$('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); device=null; chWrite=null; setStatus('Printer forgotten'); };
+
+parse();
+render();
+if (!navigator.bluetooth) setStatus('No Bluetooth in this browser — open in Chrome on Android', 'bad');
+</script>
+</body>
+</html>
