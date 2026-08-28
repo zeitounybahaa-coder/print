@@ -241,7 +241,7 @@ function receiptZpl(){
 
   const total = num(H.total);
   const tax   = num(H.tax);
-  const sub   = total - tax;
+  const sub   = DN ? total : total - tax;
 
   kv('Subtotal', money(sub), 24);
   if (!DN && tax > 0) kv('Tax', money(tax), 24);
@@ -351,7 +351,7 @@ function render(){
       + '</div></div>';
   }).join('');
 
-  const total = numOf(H.total), tax = numOf(H.tax), sub = total - tax;
+  const total = numOf(H.total), tax = numOf(H.tax), sub = DN ? total : total - tax;
   let sums = '<div class="r"><span class="k">Subtotal</span><span>'+escHtml(money(sub))+'</span></div>';
   if (!DN && tax > 0) sums += '<div class="r"><span class="k">Tax</span><span>'+escHtml(money(tax))+'</span></div>';
 
