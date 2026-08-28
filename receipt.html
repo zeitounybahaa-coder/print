@@ -100,6 +100,8 @@ const AD1  = qs.get('a1')   || '';
 const AD2  = qs.get('a2')   || '';
 const TIN  = qs.get('tin')  || '';
 const LOGO = qs.get('logo') || '';
+const PH   = qs.get('ph')   || '';
+const EM   = qs.get('em')   || '';
 const CUR  = qs.get('cur') || '$';
 const PW   = Math.min(Math.round((+(qs.get('w') || 72)) * DPMM), 576);
 const PHONE_DEFAULT = '+231 777 940 000';
@@ -194,8 +196,10 @@ function receiptZpl(){
     if (CO)  { L.push('^FO'+tx+','+ty+'^A0N,30,30^FB'+tw+',2,0,L^FD'+esc(CO)+'^FS');  ty += 34; }
     if (AD1) { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(AD1)+'^FS'); ty += 24; }
     if (AD2) { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(AD2)+'^FS'); ty += 24; }
+    if (PH)  { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(PH)+'^FS');  ty += 24; }
+    if (EM)  { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(EM)+'^FS');  ty += 24; }
     if (TIN) { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(TIN)+'^FS'); ty += 24; }
-    if (hasLogo || CO || AD1 || AD2 || TIN) y = Math.max(ty, y + (hasLogo ? 90 : 0)) + 10;
+    if (hasLogo || CO || AD1 || AD2 || PH || EM || TIN) y = Math.max(ty, y + (hasLogo ? 90 : 0)) + 10;
   }
 
   cen(42, DN ? 'DN' : 'SALES INVOICE'); y += 50;
