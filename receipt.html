@@ -94,6 +94,12 @@ const ZEBRA_READ  = '38eb4a81-c570-11e3-9507-0002a5d5c51b';
 const DPMM = 8;
 
 const qs   = new URLSearchParams(location.search);
+const DN   = (qs.get('mode') || '').toLowerCase() === 'dn';
+const CO   = qs.get('co')   || '';
+const AD1  = qs.get('a1')   || '';
+const AD2  = qs.get('a2')   || '';
+const TIN  = qs.get('tin')  || '';
+const LOGO = qs.get('logo') || '';
 const CUR  = qs.get('cur') || '$';
 const PW   = Math.min(Math.round((+(qs.get('w') || 72)) * DPMM), 576);
 const PHONE_DEFAULT = '+231 777 940 000';
@@ -144,53 +150,119 @@ function receiptZpl(){
   let y = 24;
   const H = header;
 
-  const ctr  = (sz, v) => { L.push(`^FO${M},${y}^A0N,${sz},${sz}^FB${W},1,0,C^FD${esc(v)}^FS`); };
-  const rule = () => { L.push(`^FO${M},${y}^GB${W},2,2^FS`); y += 16; };
+  const ctr  = (sz, v) => { L.push('^FO'+M+','+y+'^A0N,'+sz+','+sz+'^FB'+W+',1,0,C^FD'+esc(v)+'^FS'); };
+  const lft  = (sz, v, x) => { L.push('^FO'+(x==null?M:x)+','+y+'^A0N,'+sz+','+sz+'^FD'+esc(v)+'^FS'); };
+  const rgt  = (sz, v) => { L.push('^FO'+M+','+y+'^A0N,'+sz+','+sz+'^FB'+W+',1,0,R^FD'+esc(v)+'^FS'); };
+  const cen  = (sz, v) => { L.push('^FO'+M+','+y+'^A0N,'+sz+','+sz+'^FB'+W+',1,0,C^FD'+esc(v)+'^FS'); };
+  const rule = () => { L.push('^FO'+M+','+y+'^GB'+W+',2,2^FS'); y += 16; };
+  const thick= () => { L.push('^FO'+M+','+y+'^GB'+W+',4,4^FS'); y += 18; };
   const kv   = (k, v, sz) => {
     sz = sz || 26;
-    L.push(`^FO${M},${y}^A0N,${sz},${sz}^FD${esc(k)}^FS`);
-    L.push(`^FO${M},${y}^A0N,${sz},${sz}^FB${W},1,0,R^FD${esc(v)}^FS`);
+    L.push('^FO'+M+','+y+'^A0N,'+sz+','+sz+'^FD'+esc(k)+'^FS');
+    L.push('^FO'+M+','+y+'^A0N,'+sz+','+sz+'^FB'+W+',1,0,R^FD'+esc(v)+'^FS');
     y += sz + 8;
   };
+  const num = v => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; };
 
-  ctr(42, 'SALES RECEIPT'); y += 48;
-  ctr(28, H.inv);           y += 40;
+  // barcode: EAN-13 for 12/13 digits, Code 128 otherwise, centred
+  const barcode = (raw) => {
+    if (!raw) return;
+    const d = String(raw).replace(/\D/g, '');
+    const MOD = 2;
+    L.push('^BY'+MOD+',3,44');
+    if (d.length === 12 || d.length === 13) {
+      const data = d.length === 13 ? d.slice(0, 12) : d;
+      const w = 95 * MOD;
+      const x = M + Math.max(0, Math.round((W - w) / 2));
+      L.push('^FO'+x+','+y+'^BEN,44,Y,N^FD'+data+'^FS');
+    } else {
+      const body = esc(raw);
+      const w = Math.min(W, (body.length * 11 + 35) * MOD);
+      const x = M + Math.max(0, Math.round((W - w) / 2));
+      L.push('^FO'+x+','+y+'^BCN,44,Y,N,N^FD'+body+'^FS');
+    }
+    y += 70;
+  };
+
+  // letterhead - formal only, and only when the parameters are supplied
+  if (!DN) {
+    const hasLogo = !!LOGO;
+    if (hasLogo) L.push('^FO'+M+','+y+'^XG'+LOGO+',1,1^FS');
+    const tx = M + (hasLogo ? 102 : 0);
+    const tw = W - (hasLogo ? 102 : 0);
+    let ty = y;
+    if (CO)  { L.push('^FO'+tx+','+ty+'^A0N,30,30^FB'+tw+',2,0,L^FD'+esc(CO)+'^FS');  ty += 34; }
+    if (AD1) { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(AD1)+'^FS'); ty += 24; }
+    if (AD2) { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(AD2)+'^FS'); ty += 24; }
+    if (TIN) { L.push('^FO'+tx+','+ty+'^A0N,20,20^FB'+tw+',1,0,L^FD'+esc(TIN)+'^FS'); ty += 24; }
+    if (hasLogo || CO || AD1 || AD2 || TIN) y = Math.max(ty, y + (hasLogo ? 90 : 0)) + 10;
+  }
+
+  cen(42, DN ? 'DN' : 'SALES INVOICE'); y += 50;
   rule();
-  kv('Date', H.date);
-  kv('Client', H.client);
-  kv('Served By', H.servedBy);
-  kv('Payment', H.payment);
-  y += 4; rule();
-  L.push(`^FO${M},${y}^A0N,24,24^FDITEMS^FS`); y += 34;
+
+  kv('Receipt #', H.inv);
+  kv('Date',      H.date);
+  if (!DN) kv('Served by', H.servedBy);
+  kv('Client',    H.client);
+  rule();
+
+  lft(22, 'Name');
+  rgt(22, 'Expiry'); y += 26;
+  lft(22, 'Qty');
+  L.push('^FO'+M+','+y+'^A0N,22,22^FB'+W+',1,0,C^FDUnit Price^FS');
+  rgt(22, 'Total'); y += 26;
+  rule();
 
   for (const it of items){
-    L.push(`^FO${M},${y}^A0N,28,28^FB${W},2,2,L^FD${esc(it.name)}^FS`);
-    y += (esc(it.name).length > 32 ? 62 : 32);
-    const left = `${it.qty} x ${money(it.unitPrice)}` + (it.pcs && it.pcs !== '-' ? `  (${it.pcs})` : '');
-    L.push(`^FO${M},${y}^A0N,24,24^FD${esc(left)}^FS`);
-    L.push(`^FO${M},${y}^A0N,26,26^FB${W},1,0,R^FD${esc(money(it.lineTotal))}^FS`);
-    y += 32;
-    if (it.barcode){ const b = barcodeZpl(M, y, it.barcode, 44); if (b){ L.push(b); y += 72; } }
-    const extra = [it.pack ? ('x ' + it.pack) : '', it.expiry ? ('Exp: ' + it.expiry) : ''].filter(Boolean).join('    ');
-    if (extra){ L.push(`^FO${M},${y}^A0N,20,20^FD${esc(extra)}^FS`); y += 26; }
-    y += 8;
+    L.push('^FO'+M+','+y+'^A0N,26,26^FB'+Math.round(W*0.66)+',2,2,L^FD'+esc(it.name)+'^FS');
+    if (it.expiry) L.push('^FO'+M+','+y+'^A0N,24,24^FB'+W+',1,0,R^FD'+esc(it.expiry)+'^FS');
+    y += (esc(it.name).length > 26 ? 58 : 30);
+
+    barcode(it.barcode);
+
+    const unit = esc(it.pack || '');
+    const pcs  = (it.pcs && it.pcs !== '-' && String(it.pcs).trim() !== '') ? esc(it.pcs) : '';
+    let q = 'x' + esc(it.qty);
+    if (unit) q += ' ' + unit;
+    if (pcs && pcs !== String(it.qty)) q += '  (' + pcs + ' pcs)';
+    lft(24, q);
+    L.push('^FO'+M+','+y+'^A0N,24,24^FB'+W+',1,0,C^FD'+esc(money(it.unitPrice))+'^FS');
+    L.push('^FO'+M+','+y+'^A0N,26,26^FB'+W+',1,0,R^FD'+esc(money(it.lineTotal))+'^FS');
+    y += 34;
+    L.push('^FO'+M+','+y+'^GB'+W+',1,1^FS'); y += 12;
   }
 
   rule();
-  kv('Paid', money(H.paid));
-  kv('Balance', money(H.balance));
-  if (H.tax) kv('Tax', money(H.tax));
-  y += 4; rule();
-  L.push(`^FO${M},${y}^A0N,42,42^FDTOTAL^FS`);
-  L.push(`^FO${M},${y}^A0N,42,42^FB${W},1,0,R^FD${esc(money(H.total))}^FS`);
-  y += 58;
-  y += 12;
-  ctr(22, 'Thank you for your business!'); y += 30;
-  ctr(20, 'Powered by Tradelink Liberia');  y += 26;
-  ctr(20, H.phone);                         y += 40;
 
-  const LL = y + 24;
-  return ['^XA','^CI28',`^PW${PW}`,`^LL${LL}`,'^LH0,0','^LT0','^MTD','^POI','^MNN', ...L, '^PQ1','^XZ'].join('\n');
+  const total = num(H.total);
+  const tax   = num(H.tax);
+  const sub   = total - tax;
+
+  kv('Subtotal', money(sub), 24);
+  if (!DN && tax > 0) kv('Tax', money(tax), 24);
+
+  L.push('^FO'+M+','+y+'^A0N,38,38^FDGRAND TOTAL^FS');
+  L.push('^FO'+M+','+y+'^A0N,38,38^FB'+W+',1,0,R^FD'+esc(money(total))+'^FS');
+  y += 48;
+  rule();
+
+  if (H.payment) kv('Payment', H.payment, 24);
+  kv('Paid',    money(H.paid),    24);
+  kv('Balance', money(H.balance), 24);
+  rule();
+
+  cen(22, 'Thank you for your business!'); y += 34;
+
+  if (!DN) {
+    thick();
+    cen(26, 'Powered by Tradelink'); y += 32;
+    cen(20, 'For inquiries, call us:'); y += 24;
+    cen(24, H.phone); y += 30;
+  }
+
+  y += 40;
+  return '^XA^PW'+PW+'^LL'+y+'^LH0,0^CI28\n' + L.join('\n') + '\n^XZ';
 }
 
 /* ---------- on-screen preview ---------- */
