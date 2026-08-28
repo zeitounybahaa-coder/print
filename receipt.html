@@ -266,7 +266,8 @@ function receiptZpl(){
   }
 
   y += 40;
-  return '^XA^PW'+PW+'^LL'+y+'^LH0,0^CI28\n' + L.join('\n') + '\n^XZ';
+  const LL = y + 24;
+  return ['^XA','^CI28','^PW'+PW,'^LL'+LL,'^LH0,0','^LT0','^MTD','^POI','^MNN'].concat(L).concat(['^PQ1','^XZ']).join('\n');
 }
 
 /* ---------- on-screen preview ---------- */
