@@ -71,6 +71,7 @@
 <div class="bar">
   <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
   <button class="primary" id="btnPrint">Print</button>
+  <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print via RawBT (test)</button>
 </div>
 
 <script>
@@ -320,6 +321,16 @@ $('btnCal').onclick = async () => {
 $('btnZpl').onclick   = () => { logEl.style.display = 'block'; logEl.textContent = allZpl(); };
 $('btnCopy').onclick  = async () => { try { await navigator.clipboard.writeText(allZpl()); setStatus('ZPL copied', 'ok'); } catch(e){} };
 $('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); device = null; chWrite = null; setStatus('Printer forgotten — next print will ask again'); };
+$('btnRawbt').onclick = () => {
+  try {
+    const z = allZpl();
+    if (!z) { setStatus('Nothing to print', 'bad'); return; }
+    const bytes = new TextEncoder().encode(z);
+    let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+    setStatus('Sending ' + z.length + ' bytes to RawBT...', 'busy');
+    location.href = 'rawbt:base64,' + btoa(s);
+  } catch (e) { setStatus('RawBT: ' + (e.message || e), 'bad'); }
+};
 
 /* ---------- go ---------- */
 items = parse();
