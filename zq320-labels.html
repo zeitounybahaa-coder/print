@@ -50,6 +50,12 @@
 .seg button.on{background:var(--accent); border-color:var(--accent); color:#fff}
 .sticker{background:#fff; border-radius:6px; padding:6px; margin-top:10px}
 .sticker svg{display:block; width:100%; height:auto}
+.qtyrow{display:flex; align-items:center; gap:10px; margin-top:12px}
+.qtylab{color:var(--dim); font-size:13px; flex:1}
+.qtyval{min-width:36px; text-align:center; font-weight:700; font-size:18px}
+.step{width:42px; height:42px; border-radius:10px; border:1px solid var(--line);
+      background:var(--card); color:var(--txt); font-size:20px; line-height:1}
+.step:active{background:var(--accent); border-color:var(--accent); color:#fff}
 </style>
 </head>
 <body>
@@ -316,17 +322,31 @@ function render(){
     $('btnPrint').disabled = true;
     return;
   }
-  list.innerHTML = items.map(function(it){
+  list.innerHTML = items.map(function(it, ix){
     return '<div class="card">'
       + '<div class="row"><div class="grow">'
       +   '<div class="name">' + escHtml(it.name) + '</div>'
       +   '<div class="meta">' + (escHtml([it.cat, it.barcode].filter(Boolean).join(' · ')) || '&nbsp;') + '</div>'
-      + '</div><div style="text-align:right">'
-      +   '<div class="qty">×<b>' + it.qty + '</b></div>'
       + '</div></div>'
       + '<div class="sticker">' + stickerSvg(it) + '</div>'
+      + '<div class="qtyrow"><span class="qtylab">How many stickers</span>'
+      +   '<button class="step" data-i="' + ix + '" data-d="-1">&minus;</button>'
+      +   '<span class="qtyval">' + it.qty + '</span>'
+      +   '<button class="step" data-i="' + ix + '" data-d="1">+</button>'
+      + '</div>'
     + '</div>';
   }).join('');
+  // one delegated handler for every - / + button, survives re-renders
+  if (!list.__wired){
+    list.__wired = true;
+    list.addEventListener('click', function(e){
+      const b = e.target.closest('.step');
+      if (!b) return;
+      const ix = +b.getAttribute('data-i'), d = +b.getAttribute('data-d');
+      items[ix].qty = Math.max(1, Math.min(999, items[ix].qty + d));
+      render();
+    });
+  }
   const total = items.reduce((s, i) => s + i.qty, 0);
   $('sub').textContent = `Zebra ZQ320 · ${W_MM}×${H_MM} mm · ${items.length} product${items.length > 1 ? 's' : ''}, ${total} sticker${total > 1 ? 's' : ''}`;
   $('btnPrint').textContent = `Print ${total} sticker${total > 1 ? 's' : ''}`;
