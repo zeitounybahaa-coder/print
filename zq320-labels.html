@@ -43,12 +43,26 @@
   input[type=text]{width:100%; background:#0b0d11; border:1px solid var(--line); color:var(--txt);
                    border-radius:8px; padding:9px; font-size:13px; margin-top:6px}
   label.f{font-size:12px; color:var(--dim)}
+.seglab{color:var(--dim); font-size:12px; margin:0 0 6px}
+.seg{display:flex; gap:6px; margin:0 0 14px}
+.seg button{flex:1; padding:9px 6px; border-radius:10px; border:1px solid var(--line);
+             background:var(--card); color:var(--dim); font:600 13px/1 system-ui,sans-serif}
+.seg button.on{background:var(--accent); border-color:var(--accent); color:#fff}
+.sticker{background:#fff; border-radius:6px; padding:6px; margin-top:10px}
+.sticker svg{display:block; width:100%; height:auto}
 </style>
 </head>
 <body>
 
 <h1>Sticker Print</h1>
 <div class="sub" id="sub">Zebra ZQ320 · 76 × 25 mm · 203 dpi</div>
+<div class="seglab">Price on the sticker</div>
+<div class="seg" id="seg">
+  <button data-mode="unit">Per unit</button>
+  <button data-mode="carton">Per carton</button>
+  <button data-mode="both">Both</button>
+</div>
+
 
 <div id="list"></div>
 
@@ -160,9 +174,10 @@ function barcodeZpl(x, y, val, h){
      y 108-200  barcode + human-readable digits
      y 206-264  price (large, right)  +  package unit/price (small, left)            */
 function labelZpl(it){
-  const head  = [esc(it.code), esc(it.cat)].filter(Boolean).join('  |  ');
-  const price = money(it.price);
-  const pkg   = [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ');
+  const head  = esc(it.cat);
+  const mode  = priceMode();
+  const price = money(mode === 'carton' ? it.pkgPrice : it.price);
+  const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
   const M = 24, W = PW - 2 * M;                    // safe left/right margin + usable width
 
   // No ^LL: the printer uses its own calibrated label length, so content fits
@@ -193,6 +208,107 @@ function setStatus(text, cls){
   $('dot').className = 'dot' + (cls ? ' ' + cls : '');
 }
 
+/* ---------- which price goes on the sticker ---------- */
+let PRICE_MODE = 'both';
+try { PRICE_MODE = localStorage.getItem('zq_price_mode') || 'both'; } catch (e) {}
+function priceMode(){ return PRICE_MODE; }
+function setPriceMode(m){
+  PRICE_MODE = m;
+  try { localStorage.setItem('zq_price_mode', m); } catch (e) {}
+  Array.prototype.forEach.call(document.querySelectorAll('#seg button'), function(b){
+    b.classList.toggle('on', b.getAttribute('data-mode') === m);
+  });
+  render();
+}
+
+/* ---------- on-screen sticker preview ----------
+   Drawn from the same coordinates labelZpl() sends to the printer, so the
+   preview is a rehearsal of the print, not an approximation of it. */
+const _EL = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
+const _EG = ["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
+const _ER = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
+const _EP = ["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
+
+function ean13Check(d12){
+  let s = 0;
+  for (let i = 0; i < 12; i++) s += (+d12[i]) * (i % 2 ? 3 : 1);
+  return String((10 - (s % 10)) % 10);
+}
+
+function ean13Bits(code){
+  let d = String(code).replace(/\D/g, '');
+  if (d.length === 12) d += ean13Check(d);
+  d = d.padStart(13, '0').slice(-13).split('').map(Number);
+  const par = _EP[d[0]];
+  let bits = '101';
+  for (let i = 1; i <= 6; i++) bits += (par[i-1] === 'L' ? _EL[d[i]] : _EG[d[i]]);
+  bits += '01010';
+  for (let i = 7; i <= 12; i++) bits += _ER[d[i]];
+  return bits + '101';
+}
+
+// EAN-13 / UPC-A are drawn bar for bar. Anything else goes out as Code 128,
+// which is too much to redraw here, so the preview shows placeholder bars with
+// the real digits underneath rather than pretending to know the pattern.
+function barsSvg(raw, x, y, h){
+  const d = String(raw || '').replace(/\D/g, '');
+  const mod = 2;                                   // ^BY2 - 2 dots per module
+  if (d.length === 12 || d.length === 13){
+    const bits = ean13Bits(d);
+    let r = '';
+    for (let i = 0; i < bits.length; i++)
+      if (bits[i] === '1') r += '<rect x="' + (x + i*mod) + '" y="' + y + '" width="' + mod + '" height="' + h + '"/>';
+    const num = d.length === 12 ? d + ean13Check(d) : d;
+    r += '<text x="' + (x + bits.length*mod/2) + '" y="' + (y + h + 20) + '" font-size="20" text-anchor="middle" font-family="monospace" letter-spacing="2">' + escHtml(num) + '</text>';
+    return r;
+  }
+  if (!raw) return '';
+  let r = '', px = x;
+  for (let i = 0; i < String(raw).length * 6; i++){
+    const w = (i % 3 ? 1 : 2) * mod;
+    if (i % 2 === 0) r += '<rect x="' + px + '" y="' + y + '" width="' + w + '" height="' + h + '"/>';
+    px += w;
+  }
+  r += '<text x="' + x + '" y="' + (y + h + 20) + '" font-size="20" font-family="monospace" letter-spacing="2">' + escHtml(raw) + '</text>';
+  return r;
+}
+
+// Same two-line cap the printer applies through ^FB.
+function wrap2(s, chars){
+  const words = String(s || '').split(/\s+/).filter(Boolean);
+  const out = [];
+  let cur = '';
+  for (const w of words){
+    if (cur && (cur + ' ' + w).length <= chars){ cur += ' ' + w; continue; }
+    if (cur) out.push(cur);
+    cur = w;
+    if (out.length === 2) break;
+  }
+  if (out.length < 2 && cur) out.push(cur);
+  return out.slice(0, 2);
+}
+
+function stickerSvg(it){
+  const M = 24, W = PW - 2 * M;
+  const head  = esc(it.cat);
+  const mode  = priceMode();
+  const price = money(mode === 'carton' ? it.pkgPrice : it.price);
+  const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
+  const lines = wrap2(esc(it.name), Math.floor(W / (30 * 0.55)));
+  let g = '';
+  if (head) g += '<text x="' + M + '" y="28" font-size="20">' + escHtml(head) + '</text>';
+  lines.forEach(function(ln, i){
+    g += '<text x="' + M + '" y="' + (60 + i*32) + '" font-size="30" font-weight="600">' + escHtml(ln) + '</text>';
+  });
+  g += barsSvg(it.barcode, M + 16, 98, 52);
+  if (pkg)   g += '<text x="' + M + '" y="194" font-size="20">' + escHtml(pkg) + '</text>';
+  if (price) g += '<text x="' + (M + W) + '" y="206" font-size="48" font-weight="700" text-anchor="end">' + escHtml(price) + '</text>';
+  return '<svg viewBox="0 0 ' + PW + ' ' + LL + '" xmlns="http://www.w3.org/2000/svg" fill="#111" font-family="system-ui,Arial,sans-serif">'
+       + '<rect x="0.5" y="0.5" width="' + (PW-1) + '" height="' + (LL-1) + '" fill="#fff" stroke="#d0d3d8"/>'
+       + g + '</svg>';
+}
+
+
 function render(){
   const list = $('list');
   if (!items.length){
@@ -200,17 +316,17 @@ function render(){
     $('btnPrint').disabled = true;
     return;
   }
-  list.innerHTML = items.map(it => `
-    <div class="card"><div class="row">
-      <div class="grow">
-        <div class="name">${escHtml(it.name)}</div>
-        <div class="meta">${escHtml([it.code, it.cat, it.barcode].filter(Boolean).join(' · ')) || '&nbsp;'}</div>
-      </div>
-      <div style="text-align:right">
-        <div class="price">${escHtml(money(it.price))}</div>
-        <div class="qty">×<b>${it.qty}</b></div>
-      </div>
-    </div></div>`).join('');
+  list.innerHTML = items.map(function(it){
+    return '<div class="card">'
+      + '<div class="row"><div class="grow">'
+      +   '<div class="name">' + escHtml(it.name) + '</div>'
+      +   '<div class="meta">' + (escHtml([it.cat, it.barcode].filter(Boolean).join(' · ')) || '&nbsp;') + '</div>'
+      + '</div><div style="text-align:right">'
+      +   '<div class="qty">×<b>' + it.qty + '</b></div>'
+      + '</div></div>'
+      + '<div class="sticker">' + stickerSvg(it) + '</div>'
+    + '</div>';
+  }).join('');
   const total = items.reduce((s, i) => s + i.qty, 0);
   $('sub').textContent = `Zebra ZQ320 · ${W_MM}×${H_MM} mm · ${items.length} product${items.length > 1 ? 's' : ''}, ${total} sticker${total > 1 ? 's' : ''}`;
   $('btnPrint').textContent = `Print ${total} sticker${total > 1 ? 's' : ''}`;
@@ -334,7 +450,10 @@ $('btnRawbt').onclick = () => {
 
 /* ---------- go ---------- */
 items = parse();
-render();
+Array.prototype.forEach.call(document.querySelectorAll('#seg button'), function(b){
+  b.onclick = function(){ setPriceMode(b.getAttribute('data-mode')); };
+});
+setPriceMode(PRICE_MODE);          // paints the toggle, then renders
 if (!navigator.bluetooth) setStatus('No Bluetooth in this browser — open in Chrome on Android', 'bad');
 </script>
 </body>
