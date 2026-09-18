@@ -90,6 +90,9 @@
 
 <div class="bar">
   <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:0 0 10px">
+    <input type="checkbox" id="chkCont"> Receipt paper (no label gaps)
+  </label>
   <button class="primary" id="btnPrint">Print</button>
   <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print via RawBT (test)</button>
 </div>
@@ -117,11 +120,27 @@ const qs   = new URLSearchParams(location.search);
 const CUR  = qs.get('cur') || '$';
 const W_MM = +(qs.get('w') || 76);
 const H_MM = +(qs.get('h') || 38);
-const GAP  = (qs.get('media') || 'gap') === 'gap';          // die-cut labels vs continuous
+let   GAP  = (qs.get('media') || 'gap') === 'gap';          // die-cut labels vs continuous
 const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print width = 576 dots
 const LL   = Math.round(H_MM * DPMM);
 
 const $ = id => document.getElementById(id);
+
+/* Receipt roll vs die-cut labels. On continuous paper the ZQ320 hunts for a label
+   gap it will never find and feeds until it gives up, wasting a long blank strip.
+   Let whoever is printing say which stock is loaded; the choice sticks per device. */
+try {
+  const _c = $('chkCont');
+  if (_c) {
+    const _saved = localStorage.getItem('zq320.continuous');
+    if (_saved !== null) GAP = _saved !== '1';
+    _c.checked = !GAP;
+    _c.addEventListener('change', () => {
+      GAP = !_c.checked;
+      try { localStorage.setItem('zq320.continuous', _c.checked ? '1' : '0'); } catch (e) {}
+    });
+  }
+} catch (e) {}
 const logEl = $('log');
 
 let items = [], device = null, chWrite = null, chRead = null;
@@ -195,7 +214,7 @@ function labelZpl(it){
     '^CI28',                                       // UTF-8 in
     `^PW${PW}`, '^LH0,0', '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
-    GAP ? '^MNY' : '^MNN',                         // gap sensing for die-cut label stock
+    GAP ? `^MNY^LL${LL}^ML${LL + 80}` : `^MNN^LL${LL}`,  // pin the label length; cap the gap hunt at one label + 10 mm
     head  ? `^FO${M},10^A0N,20,20^FB${W},1,0,L^FD${head}^FS` : '',
     `^FO${M},34^A0N,30,30^FB${W},2,2,L^FD${esc(it.name)}^FS`,
     barcodeZpl(M + 16, 98, it.barcode, 52),
@@ -362,6 +381,12 @@ async function connect(){
 
   if (device && device.gatt.connected && chWrite) return;
 
+  /* Half-open link left by a previous print: drop it before asking for a new one. */
+  if (device && device.gatt && device.gatt.connected && !chWrite){
+    try { device.gatt.disconnect(); } catch (e){}
+    await new Promise(r => setTimeout(r, 400));
+  }
+
   // Reuse a previously granted printer so there's no chooser on every print.
   if (!device && navigator.bluetooth.getDevices){
     try {
@@ -381,7 +406,20 @@ async function connect(){
   }
 
   setStatus('Connecting…', 'busy');
-  const gatt = await device.gatt.connect();
+  /* The ZQ320 allows one GATT client and is slow to notice the last one has gone.
+     A single failed connect is what used to send people into Android's Bluetooth
+     settings to forget the printer, so retry instead of giving up. */
+  let gatt = null, lastErr = null;
+  for (let attempt = 1; attempt <= 4; attempt++){
+    try { gatt = await device.gatt.connect(); break; }
+    catch (e){
+      lastErr = e;
+      setStatus('Connecting\u2026 (try ' + (attempt + 1) + ')', 'busy');
+      try { device.gatt.disconnect(); } catch (e2){}
+      await new Promise(r => setTimeout(r, 700 * attempt));
+    }
+  }
+  if (!gatt) throw new Error('Could not reach the printer. Check it is on, within a metre, and NOT paired in Android Bluetooth settings. ' + ((lastErr && lastErr.message) || ''));
   const svc  = await gatt.getPrimaryService(SVC);
   chWrite    = await svc.getCharacteristic(ZEBRA_WRITE);
   try { chRead = await svc.getCharacteristic(ZEBRA_READ); } catch(e){ chRead = null; }
@@ -402,6 +440,9 @@ function release(){
   chWrite = null; chRead = null;
 }
 window.addEventListener('pagehide', release);
+/* Android Chrome often skips pagehide when the app is backgrounded, which left the
+   printer holding a dead link. Releasing on hide is what makes the next print connect. */
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') release(); });
 
 async function send(text){
   const bytes = new TextEncoder().encode(text);
