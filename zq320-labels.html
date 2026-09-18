@@ -395,6 +395,14 @@ async function connect(){
   setStatus('Connected to ' + (device.name || 'printer'), 'ok');
 }
 
+/* The ZQ320 accepts one BLE client at a time. Leaving the GATT link open is
+   why the next print needed the phone to forget the printer and pair again. */
+function release(){
+  try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch(e){}
+  chWrite = null; chRead = null;
+}
+window.addEventListener('pagehide', release);
+
 async function send(text){
   const bytes = new TextEncoder().encode(text);
   const CHUNK = 20;                                  // BLE default MTU — chunk, as Zebra advises
@@ -415,9 +423,13 @@ $('btnPrint').onclick = async () => {
     await send(allZpl());
     const n = items.reduce((s, i) => s + i.qty, 0);
     setStatus(`Sent ${n} sticker${n > 1 ? 's' : ''} to the printer`, 'ok');
+    /* Writes are fire-and-forget, so let the printer drain before cutting the link. */
+    await new Promise(r => setTimeout(r, 2000));
+    release();
   } catch (e){
     setStatus(e.message || String(e), 'bad');
     say('ERROR: ' + (e.message || e));
+    release();
   }
   $('btnPrint').disabled = false;
 };
