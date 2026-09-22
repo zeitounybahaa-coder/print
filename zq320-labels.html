@@ -214,7 +214,7 @@ function labelZpl(it){
     '^CI28',                                       // UTF-8 in
     `^PW${PW}`, '^LH0,0', '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
-    GAP ? `^MNY^LL${LL}^ML${LL + 80}` : `^MNN^LL${LL}`,  // pin the label length; cap the gap hunt at one label + 10 mm
+    GAP ? `^MNY^LL${LL}^ML${LL * 2}` : `^MNN^LL${LL}`,  // pin the label length; cap the gap hunt at one label + 10 mm
     head  ? `^FO${M},10^A0N,20,20^FB${W},1,0,L^FD${head}^FS` : '',
     `^FO${M},34^A0N,30,30^FB${W},2,2,L^FD${esc(it.name)}^FS`,
     barcodeZpl(M + 16, 98, it.barcode, 52),
@@ -461,6 +461,22 @@ $('btnPrint').onclick = async () => {
   $('btnPrint').disabled = true;
   try {
     await connect();
+
+    /* The label length the ZQ320 uses in gap mode is the one IT measured, not the ^LL
+       we send — ^LL only applies to continuous media. An uncalibrated printer holds a
+       long default length, prints the content at the top of it and then feeds blank
+       labels to make up the rest. That is the five blank stickers after every good one.
+       So measure once per phone, before the first print, and remember it. */
+    let calibrated = false;
+    try { calibrated = localStorage.getItem('zq320.calibrated') === '1'; } catch (e){}
+    if (GAP && !calibrated){
+      setStatus('First print — measuring the label (feeds one)\u2026', 'busy');
+      await send('! U1 do "device.calibrate"\r\n');
+      await new Promise(r => setTimeout(r, 6000));   // it feeds and measures; do not print over it
+      try { localStorage.setItem('zq320.calibrated', '1'); } catch (e){}
+    }
+
+    setStatus('Printing\u2026', 'busy');
     await send(allZpl());
     const n = items.reduce((s, i) => s + i.qty, 0);
     setStatus(`Sent ${n} sticker${n > 1 ? 's' : ''} to the printer`, 'ok');
@@ -504,12 +520,13 @@ $('btnCal').onclick = async () => {
     await connect();
     await send('! U1 do "device.calibrate"\r\n');
     setStatus('Calibration sent — done in a moment', 'ok');
+    try { localStorage.setItem('zq320.calibrated', '1'); } catch (e){}   // done by hand, so don't repeat it on the first print
   } catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
 };
 
 $('btnZpl').onclick   = () => { logEl.style.display = 'block'; logEl.textContent = allZpl(); };
 $('btnCopy').onclick  = async () => { try { await navigator.clipboard.writeText(allZpl()); setStatus('ZPL copied', 'ok'); } catch(e){} };
-$('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); device = null; chWrite = null; setStatus('Printer forgotten — next print will ask again'); };
+$('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); localStorage.removeItem('zq320.calibrated'); device = null; chWrite = null; setStatus('Printer forgotten — next print will ask again'); };
 $('btnRawbt').onclick = () => {
   try {
     const z = allZpl();
