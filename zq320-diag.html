@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ZQ320 Diagnostic</title>
+<style>
+  :root{ --bg:#0f1115; --card:#191c23; --line:#2a2f3a; --txt:#e7e9ee;
+         --dim:#9aa0b2; --ok:#4cc38a; --bad:#ef4444; --accent:#3b82f6; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; background:var(--bg); color:var(--txt);
+        font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; padding:14px 14px 30px; }
+  h1{ font-size:19px; margin:0 0 4px; }
+  p.sub{ color:var(--dim); font-size:13px; margin:0 0 16px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:12px;
+         padding:14px; margin-bottom:12px; }
+  .card h2{ font-size:15px; margin:0 0 4px; }
+  .card .why{ color:var(--dim); font-size:13px; margin:0 0 10px; }
+  button{ width:100%; padding:13px; font-size:16px; font-weight:600; border-radius:10px;
+          border:1px solid var(--line); background:#232833; color:var(--txt); margin-top:8px; }
+  button.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled{ opacity:.5; }
+  #status{ position:sticky; top:0; z-index:5; background:var(--bg); padding:8px 0 12px;
+           display:flex; align-items:center; gap:9px; font-size:14px; }
+  .dot{ width:11px; height:11px; border-radius:50%; background:#555; flex:none; }
+  .dot.ok{ background:var(--ok); } .dot.bad{ background:var(--bad); } .dot.busy{ background:#eab308; }
+  pre{ background:#0b0d11; border:1px solid var(--line); border-radius:10px; padding:11px;
+       font-size:12.5px; white-space:pre-wrap; word-break:break-word; max-height:45vh;
+       overflow:auto; margin:10px 0 0; }
+</style>
+</head>
+<body>
+
+<h1>ZQ320 label-length diagnostic</h1>
+<p class="sub">Load the real 60&times;40 labels. Work down the page in order and tell Claude
+what each test does — how many labels came out, and where the text landed.</p>
+
+<div id="status"><span class="dot" id="dot"></span><span id="msg">Not connected</span></div>
+
+<div class="card">
+  <h2>1 &middot; Connect</h2>
+  <p class="why">Pick the printer once. Everything below reuses this link.</p>
+  <button class="primary" id="btnConnect">Connect to printer</button>
+</div>
+
+<div class="card">
+  <h2>2 &middot; Ask the printer what it thinks</h2>
+  <p class="why">This is the important one. It reads back the printer's own media type and
+  label length. No paper used.</p>
+  <button id="btnRead">Read printer settings</button>
+</div>
+
+<div class="card">
+  <h2>3 &middot; Three one-label tests</h2>
+  <p class="why">Each prints a single label with its own letter on it, using a different
+  media setting. Count how many labels come out for each.</p>
+  <button id="btnA">TEST A &mdash; gap sensing, no length</button>
+  <button id="btnB">TEST B &mdash; continuous, length forced to 40&nbsp;mm</button>
+  <button id="btnC">TEST C &mdash; gap sensing + length 40&nbsp;mm</button>
+</div>
+
+<div class="card">
+  <h2>4 &middot; Measure, then retest</h2>
+  <p class="why">Calibrate makes the printer feed and measure the label itself. Then read the
+  settings again and run TEST A again &mdash; if A now stops at one label, calibration is the fix.</p>
+  <button id="btnCal">Calibrate (feeds 1&ndash;2 labels)</button>
+  <button id="btnSet">Force label length to 320 dots and save</button>
+</div>
+
+<pre id="log">Log will appear here.</pre>
+
+<script>
+const SVC   = '38eb4a80-c570-11e3-9507-0002a5d5c51b';
+const WRITE = '38eb4a82-c570-11e3-9507-0002a5d5c51b';
+const READ  = '38eb4a81-c570-11e3-9507-0002a5d5c51b';
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+let device = null, chWrite = null, chRead = null, rxBuf = '';
+
+function say(s){ logEl.textContent += (logEl.textContent === 'Log will appear here.' ? '' : '\n') + s; logEl.scrollTop = logEl.scrollHeight; }
+function setStatus(t, c){ $('msg').textContent = t; $('dot').className = 'dot' + (c ? ' ' + c : ''); }
+
+/* The ZQ320 takes one BLE client at a time and is slow to notice the last one left,
+   so a single failed connect is not a real failure — retry before giving up. */
+async function connect(){
+  if (device && device.gatt && device.gatt.connected && chWrite) return;
+  if (!navigator.bluetooth) throw new Error('Use Chrome on Android.');
+
+  if (!device){
+    setStatus('Choose your printer…', 'busy');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SVC] }, { namePrefix: 'ZQ' }, { namePrefix: 'XX' }],
+      optionalServices: [SVC]
+    });
+  }
+
+  let gatt = null, lastErr = null;
+  for (let a = 1; a <= 4; a++){
+    try { gatt = await device.gatt.connect(); break; }
+    catch (e){
+      lastErr = e;
+      setStatus('Connecting… (try ' + (a + 1) + ')', 'busy');
+      try { device.gatt.disconnect(); } catch (e2){}
+      await new Promise(r => setTimeout(r, 700 * a));
+    }
+  }
+  if (!gatt) throw new Error('Could not reach the printer. Check it is on, close by, and NOT paired in Android Bluetooth settings. ' + ((lastErr && lastErr.message) || ''));
+
+  const svc = await gatt.getPrimaryService(SVC);
+  chWrite = await svc.getCharacteristic(WRITE);
+  try {
+    chRead = await svc.getCharacteristic(READ);
+    await chRead.startNotifications();
+    chRead.addEventListener('characteristicvaluechanged', e => {
+      rxBuf += new TextDecoder().decode(e.target.value);
+    });
+  } catch (e){ chRead = null; say('(no read channel: ' + e.message + ')'); }
+
+  device.addEventListener('gattserverdisconnected', () => {
+    chWrite = null; setStatus('Printer disconnected', 'bad');
+  });
+  setStatus('Connected to ' + (device.name || 'printer'), 'ok');
+}
+
+/* 20-byte chunks: BLE will silently drop anything larger on this printer. */
+async function send(text){
+  const bytes = new TextEncoder().encode(text);
+  for (let i = 0; i < bytes.length; i += 20){
+    await chWrite.writeValueWithoutResponse(bytes.slice(i, i + 20));
+    await new Promise(r => setTimeout(r, 18));
+  }
+}
+
+/* Ask one SGD question and wait for the printer to answer. */
+async function ask(varName){
+  rxBuf = '';
+  await send('! U1 getvar "' + varName + '"\r\n');
+  await new Promise(r => setTimeout(r, 900));
+  const answer = rxBuf.replace(/[\r\n"]/g, '').trim();
+  say('  ' + varName.padEnd(26) + ' = ' + (answer || '(no answer)'));
+  return answer;
+}
+
+function testZpl(letter, mediaCmds){
+  return '^XA^CI28^PW480^LH0,0^LT0^MTD'
+       + mediaCmds
+       + '^FO40,40^A0N,70,70^FDTEST ' + letter + '^FS'
+       + '^FO40,130^A0N,28,28^FD' + mediaCmds.replace(/\^/g, ' ') + '^FS'
+       + '^XZ';
+}
+
+async function run(label, fn){
+  try { setStatus(label + '…', 'busy'); await connect(); await fn(); setStatus(label + ' — done', 'ok'); }
+  catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
+}
+
+$('btnConnect').onclick = () => run('Connecting', async () => { say('Connected.'); });
+
+$('btnRead').onclick = () => run('Reading settings', async () => {
+  say('\n--- printer settings ' + new Date().toLocaleTimeString() + ' ---');
+  if (!chRead){ say('  No read channel — the printer cannot answer questions.'); return; }
+  for (const v of ['device.friendly_name','media.type','media.sensor_type','media.printmode',
+                   'zpl.label_length','ezpl.label_length_max','zpl.print_width',
+                   'ezpl.media_type','ezpl.print_method','ezpl.tear_off']){
+    await ask(v);
+  }
+});
+
+$('btnA').onclick = () => run('Test A', async () => { say('\nTEST A sent (gap, no length)');     await send(testZpl('A', '^MNY')); });
+$('btnB').onclick = () => run('Test B', async () => { say('\nTEST B sent (continuous, LL320)');  await send(testZpl('B', '^MNN^LL320')); });
+$('btnC').onclick = () => run('Test C', async () => { say('\nTEST C sent (gap + LL320)');        await send(testZpl('C', '^MNY^LL320')); });
+
+$('btnCal').onclick = () => run('Calibrating', async () => {
+  say('\nCalibration sent — the printer will feed and measure.');
+  await send('! U1 do "device.calibrate"\r\n');
+});
+
+$('btnSet').onclick = () => run('Setting length', async () => {
+  say('\nForcing zpl.label_length to 320 dots and saving to the printer.');
+  await send('! U1 setvar "zpl.label_length" "320"\r\n');
+  await new Promise(r => setTimeout(r, 600));
+  await send('^XA^JUS^XZ');
+  await new Promise(r => setTimeout(r, 900));
+  if (chRead) await ask('zpl.label_length');
+});
+
+/* Hand the printer back when this page goes away, or the next print cannot connect. */
+function release(){
+  try { if (device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e){}
+  chWrite = null; chRead = null;
+}
+window.addEventListener('pagehide', release);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') release(); });
+</script>
+</body>
+</html>
