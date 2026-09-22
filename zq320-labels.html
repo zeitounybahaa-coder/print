@@ -56,6 +56,11 @@
 .step{width:42px; height:42px; border-radius:10px; border:1px solid var(--line);
       background:var(--card); color:var(--txt); font-size:20px; line-height:1}
 .step:active{background:var(--accent); border-color:var(--accent); color:#fff}
+  .nudge{ display:flex; align-items:center; gap:7px; justify-content:center;
+           font-size:13px; opacity:.85; margin:0 0 10px; flex-wrap:wrap; }
+  .nudge b{ min-width:48px; text-align:center; font-size:14px; }
+  .nudge .nb{ width:40px; height:34px; font-size:18px; line-height:1; padding:0;
+              border-radius:8px; margin:0; }
 </style>
 </head>
 <body>
@@ -90,7 +95,17 @@
 
 <div class="bar">
   <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
-    <button class="primary" id="btnPrint">Print</button>
+      <div class="nudge">
+    <span>Across</span>
+    <button class="nb" data-ax="x" data-d="-8">&minus;</button>
+    <b id="oxv">0</b>
+    <button class="nb" data-ax="x" data-d="8">+</button>
+    <span>Down</span>
+    <button class="nb" data-ax="y" data-d="-8">&minus;</button>
+    <b id="oyv">0</b>
+    <button class="nb" data-ax="y" data-d="8">+</button>
+  </div>
+  <button class="primary" id="btnPrint">Print</button>
   <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print via RawBT (test)</button>
 </div>
 
@@ -121,6 +136,34 @@ const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print w
 const LL   = Math.round(H_MM * DPMM);
 
 const $ = id => document.getElementById(id);
+
+/* Where the label actually sits under the printhead is a physical thing — it varies by
+   printer and by how the roll is seated, so it cannot be computed here. These two nudges
+   move the whole label via ^LH, 1 mm per tap, and stick per device. */
+let OX = 0, OY = 0;
+try {
+  OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
+  OY = parseInt(localStorage.getItem('zq320.oy') || '0', 10) || 0;
+} catch (e){}
+
+function showNudge(){
+  const x = $('oxv'), y = $('oyv');
+  if (x) x.textContent = (OX / 8).toFixed(0) + ' mm';
+  if (y) y.textContent = (OY / 8).toFixed(0) + ' mm';
+}
+document.querySelectorAll('.nb').forEach(b => {
+  b.addEventListener('click', () => {
+    const step = +b.dataset.d;
+    if (b.dataset.ax === 'x') OX = Math.max(-160, Math.min(160, OX + step));
+    else                      OY = Math.max(-160, Math.min(160, OY + step));
+    try {
+      localStorage.setItem('zq320.ox', String(OX));
+      localStorage.setItem('zq320.oy', String(OY));
+    } catch (e){}
+    showNudge();
+  });
+});
+showNudge();
 
 const logEl = $('log');
 
@@ -193,7 +236,7 @@ function labelZpl(it){
   return [
     '^XA',
     '^CI28',                                       // UTF-8 in
-    `^PW${PW}`, '^LH0,0', '^LT0', '^MTD',
+    `^PW${PW}`, `^LH${OX},${OY}`, '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
     /* Measured on the real printer, 22 Sep: with ^MNY (gap sensing) it prints one good
        label and then feeds five blank ones, calibrated or not — this ZQ320's gap sensor
