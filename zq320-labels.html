@@ -90,10 +90,7 @@
 
 <div class="bar">
   <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:0 0 10px">
-    <input type="checkbox" id="chkCont"> Receipt paper (no label gaps)
-  </label>
-  <button class="primary" id="btnPrint">Print</button>
+    <button class="primary" id="btnPrint">Print</button>
   <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print via RawBT (test)</button>
 </div>
 
@@ -118,29 +115,13 @@ const DPMM = 8;                                             // 203 dpi = 8 dots/
 
 const qs   = new URLSearchParams(location.search);
 const CUR  = qs.get('cur') || '$';
-const W_MM = +(qs.get('w') || 76);
-const H_MM = +(qs.get('h') || 38);
-let   GAP  = (qs.get('media') || 'gap') === 'gap';          // die-cut labels vs continuous
+const W_MM  = +(qs.get('w') || 60);                            // the stock in use is 60 x 40 mm
+const H_MM  = +(qs.get('h') || 40);                            // drives ^LL, which is what stops the feed
 const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print width = 576 dots
 const LL   = Math.round(H_MM * DPMM);
 
 const $ = id => document.getElementById(id);
 
-/* Receipt roll vs die-cut labels. On continuous paper the ZQ320 hunts for a label
-   gap it will never find and feeds until it gives up, wasting a long blank strip.
-   Let whoever is printing say which stock is loaded; the choice sticks per device. */
-try {
-  const _c = $('chkCont');
-  if (_c) {
-    const _saved = localStorage.getItem('zq320.continuous');
-    if (_saved !== null) GAP = _saved !== '1';
-    _c.checked = !GAP;
-    _c.addEventListener('change', () => {
-      GAP = !_c.checked;
-      try { localStorage.setItem('zq320.continuous', _c.checked ? '1' : '0'); } catch (e) {}
-    });
-  }
-} catch (e) {}
 const logEl = $('log');
 
 let items = [], device = null, chWrite = null, chRead = null;
@@ -214,7 +195,11 @@ function labelZpl(it){
     '^CI28',                                       // UTF-8 in
     `^PW${PW}`, '^LH0,0', '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
-    GAP ? `^MNY^LL${LL}^ML${LL * 2}` : `^MNN^LL${LL}`,  // pin the label length; cap the gap hunt at one label + 10 mm
+    /* Measured on the real printer, 22 Sep: with ^MNY (gap sensing) it prints one good
+       label and then feeds five blank ones, calibrated or not — this ZQ320's gap sensor
+       does not find the liner gaps. With ^MNN and an explicit ^LL it stops dead on the
+       first label. So we drive the length ourselves and never ask the sensor. */
+    `^MNN^LL${LL}`,
     head  ? `^FO${M},10^A0N,20,20^FB${W},1,0,L^FD${head}^FS` : '',
     `^FO${M},34^A0N,30,30^FB${W},2,2,L^FD${esc(it.name)}^FS`,
     barcodeZpl(M + 16, 98, it.barcode, 52),
@@ -461,20 +446,6 @@ $('btnPrint').onclick = async () => {
   $('btnPrint').disabled = true;
   try {
     await connect();
-
-    /* The label length the ZQ320 uses in gap mode is the one IT measured, not the ^LL
-       we send — ^LL only applies to continuous media. An uncalibrated printer holds a
-       long default length, prints the content at the top of it and then feeds blank
-       labels to make up the rest. That is the five blank stickers after every good one.
-       So measure once per phone, before the first print, and remember it. */
-    let calibrated = false;
-    try { calibrated = localStorage.getItem('zq320.calibrated') === '1'; } catch (e){}
-    if (GAP && !calibrated){
-      setStatus('First print — measuring the label (feeds one)\u2026', 'busy');
-      await send('! U1 do "device.calibrate"\r\n');
-      await new Promise(r => setTimeout(r, 6000));   // it feeds and measures; do not print over it
-      try { localStorage.setItem('zq320.calibrated', '1'); } catch (e){}
-    }
 
     setStatus('Printing\u2026', 'busy');
     await send(allZpl());
