@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L'Oven Invoice — ZQ320</title>
+<style>
+  :root{--bg:#0f1115;--card:#191c23;--line:#2a2f3a;--txt:#e7e9ee;--dim:#9aa3b2;--accent:#1d4ed8;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--ink:#1e3a8a}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:14px 14px 130px}
+  h1{font-size:18px;margin:0 0 2px} .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
+  .inv{background:#fff;color:#111;border-radius:10px;padding:14px;max-width:380px;margin:0 auto 12px;font-variant-numeric:tabular-nums}
+  .lh{text-align:center;color:var(--ink)} .lh .co{font-weight:800;font-size:20px;letter-spacing:.5px}
+  .lh .d{font-size:11px;line-height:1.35;color:#334}
+  .ttl{text-align:center;font-weight:800;font-size:18px;color:var(--ink);text-decoration:underline;margin:8px 0 6px}
+  .meta{display:flex;justify-content:space-between;font-size:13px;margin:2px 0}
+  .meta b{color:#b91c1c}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  th,td{border:1px solid #93a4c8;padding:4px 3px;color:#111}
+  th{color:var(--ink);font-weight:700;background:#eef2fb}
+  td.n,th.n{text-align:right} td.c,th.c{text-align:center}
+  .neg{color:#b91c1c}
+  .sum{margin-top:8px;font-size:13px}
+  .sum .r{display:flex;justify-content:space-between;padding:2px 0}
+  .sum .t{font-weight:800;font-size:17px;border-top:2px solid #111;margin-top:4px;padding-top:4px}
+  .sig{margin-top:26px;border-top:1px solid #333;width:60%;font-size:12px;color:#333;padding-top:2px}
+  button{font:inherit;color:#fff;border:0;border-radius:10px;padding:12px 16px;background:#2a2f3a;cursor:pointer}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .primary{background:var(--accent);font-weight:600;width:100%;padding:16px;font-size:17px}
+  .ghost{background:transparent;border:1px solid var(--line);color:var(--dim);padding:8px 12px;font-size:13px}
+  .bar{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 70%,transparent)}
+  .status{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px;color:var(--dim)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none}
+  .dot.ok{background:var(--ok)} .dot.busy{background:var(--warn)} .dot.bad{background:var(--bad)}
+  .empty{color:#666;text-align:center;padding:34px 10px}
+  pre{white-space:pre-wrap;word-break:break-all;background:#0b0d11;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:#8fd0a0;max-height:240px;overflow:auto}
+  details{margin-top:6px} summary{color:var(--dim);font-size:13px;cursor:pointer;padding:6px 0}
+  .tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  input[type=text]{width:100%;background:#0b0d11;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px;font-size:13px;margin-top:6px}
+  label.f{font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<h1>L'Oven Invoice</h1>
+<div class="sub" id="sub">Zebra ZQ320 · 72 mm thermal</div>
+<div id="view"></div>
+<details>
+  <summary>Advanced / troubleshooting</summary>
+  <div style="background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px">
+    <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
+    <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
+    <div class="tools">
+      <button class="ghost" id="btnCal">Calibrate printer</button>
+      <button class="ghost" id="btnDiag">Inspect printer services</button>
+      <button class="ghost" id="btnZpl">Show ZPL</button>
+      <button class="ghost" id="btnCopy">Copy ZPL</button>
+      <button class="ghost" id="btnForget">Forget printer</button>
+    </div>
+    <pre id="log" style="display:none"></pre>
+  </div>
+</details>
+<div class="bar">
+  <div class="status"><span class="dot" id="dot"></span><span id="msg">Ready</span></div>
+  <button class="primary" id="btnPrint">Print invoice</button>
+  <button class="ghost" id="btnRawbt" style="width:100%;margin-top:8px">Print via RawBT (test)</button>
+</div>
+<script>
+/* ------------------------------------------------------------------
+   L'Oven Bakery van invoice for Zebra ZQ320 (72 mm), Web Bluetooth.
+   Layout follows L'Oven's paper invoice book.
+
+   URL fragment:  #d=<header>~~<item>~<item>~...
+     header (| separated):
+       0 invoiceNo | 1 date | 2 client | 3 servedBy | 4 payment
+       | 5 paid | 6 balance | 7 grandTotal | 8 subTotal
+       | 9 discountPct | 10 discountAmount
+     item (| separated):
+       0 name | 1 sold | 2 returned | 3 unitPrice | 4 lineTotal (net)
+------------------------------------------------------------------- */
+const ZEBRA_WRITE='38eb4a82-c570-11e3-9507-0002a5d5c51b';
+const ZEBRA_READ ='38eb4a81-c570-11e3-9507-0002a5d5c51b';
+const DPMM=8;
+const qs=new URLSearchParams(location.search);
+const CUR=qs.get('cur')||'$';
+const PW=Math.min(Math.round((+(qs.get('w')||72))*DPMM),576);
+
+/* letterhead, as printed on L'Oven's paper invoice */
+const CO ="L'OVEN BAKERY Inc.";
+const LH =["14th Street, Sinkor, Monrovia - Liberia",
+           "Tel: 0888 444441 / 0777 526526",
+           "0776 001177 / 0888 001177",
+           "loven.bakery@yahoo.com"];
+
+const $=id=>document.getElementById(id);
+const logEl=$('log');
+let header=null,items=[],device=null,chWrite=null,chRead=null;
+
+function parse(){
+  const raw=decodeURIComponent((location.hash.replace(/^#/,'').match(/(?:^|&)d=([^&]*)/)||[,''])[1]||'');
+  if(!raw.trim()) return;
+  const [head,itemStr]=raw.split('~~');
+  const h=(head||'').split('|').map(s=>(s||'').trim());
+  header={inv:h[0]||'',date:h[1]||'',client:h[2]||'',servedBy:h[3]||'',payment:h[4]||'',
+          paid:h[5]||'',balance:h[6]||'',total:h[7]||'',sub:h[8]||'',discPct:h[9]||'',discAmt:h[10]||''};
+  items=(itemStr||'').split('~').map(r=>r.split('|')).filter(f=>f[0]&&f[0].trim()).map(f=>({
+    name:(f[0]||'').trim(),sold:(f[1]||'').trim(),ret:(f[2]||'').trim(),
+    price:(f[3]||'').trim(),amt:(f[4]||'').trim()}));
+}
+
+const num=v=>{const n=parseFloat(String(v).replace(/[^0-9.\-]/g,''));return isNaN(n)?0:n;};
+const intS=v=>{const n=num(v);return n?String(Math.round(n)):'0';};
+const money=v=>{const n=num(v);return (n<0?'-':'')+Math.abs(n).toFixed(2);};
+const esc=s=>String(s==null?'':s).replace(/[\^~\\]/g,' ').replace(/\s+/g,' ').trim();
+const escHtml=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* totals: recomputed from the lines so the slip always adds up */
+function totals(){
+  const sub=items.reduce((a,it)=>a+num(it.amt),0);
+  const pct=num(header.discPct);
+  const disc=pct?Math.round(sub*pct)/100:num(header.discAmt);
+  return {sub, pct, disc, total:sub-disc};
+}
+
+/* ---------- ZPL (72 mm continuous, ^POI) ---------- */
+function invoiceZpl(){
+  if(!header) return '';
+  const M=16, W=PW-2*M, L=[]; let y=20;
+  const box=(x,yy,w,h,t)=>L.push('^FO'+x+','+yy+'^GB'+w+','+h+','+(t||2)+'^FS');
+  const txt=(x,yy,w,sz,v,al,lines)=>L.push('^FO'+x+','+yy+'^A0N,'+sz+','+sz+'^FB'+w+','+(lines||1)+',0,'+(al||'L')+'^FD'+esc(v)+'^FS');
+
+  // letterhead
+  txt(M,y,W,40,CO,'C'); y+=46;
+  for(const l of LH){ txt(M,y,W,20,l,'C'); y+=23; }
+  y+=6;
+  txt(M,y,W,38,'INVOICE','C'); y+=40;
+  L.push('^FO'+(M+Math.round(W/2)-80)+','+y+'^GB160,3,3^FS'); y+=14;
+
+  txt(M,y,W,24,'No. '+header.inv,'L'); txt(M,y,W,24,'Date: '+header.date,'R'); y+=32;
+  txt(M,y,W,26,'M/s '+header.client,'L',2); y+=(esc(header.client).length>28?60:34);
+  if(header.servedBy){ txt(M,y,W,20,'Served by: '+header.servedBy,'L'); y+=28; }
+
+  // table: Qty | Description | Price | Ret | Amount
+  const cw=[56, W-56-80-50-100, 80, 50, 100];
+  const cx=[M]; for(let i=1;i<cw.length;i++) cx.push(cx[i-1]+cw[i-1]);
+  const hdr=['Qty','Description','Price','Ret','Amount'];
+  const rowH=40;
+  box(M,y,W,rowH,2);
+  for(let i=1;i<cw.length;i++) box(cx[i],y,2,rowH,2);
+  hdr.forEach((h,i)=>txt(cx[i]+2,y+10,cw[i]-4,22,h,i===1?'L':'C'));
+  y+=rowH;
+  for(const it of items){
+    const two=esc(it.name).length>17;
+    const h=two?64:rowH;
+    box(M,y,W,h,1);
+    for(let i=1;i<cw.length;i++) box(cx[i],y,1,h,1);
+    const ty=y+(two?6:10);
+    txt(cx[0]+2,y+10,cw[0]-4,24,intS(it.sold),'C');
+    txt(cx[1]+4,ty,cw[1]-6,22,it.name,'L',2);
+    txt(cx[2]+2,y+10,cw[2]-6,22,money(it.price),'R');
+    txt(cx[3]+2,y+10,cw[3]-4,24,num(it.ret)?intS(it.ret):'-','C');
+    txt(cx[4]+2,y+10,cw[4]-8,24,money(it.amt),'R');
+    y+=h;
+  }
+  y+=14;
+
+  const t=totals();
+  const kv=(k,v,sz)=>{sz=sz||26; txt(M,y,W-110,sz,k,'R'); txt(M,y,W,sz,v,'R'); y+=sz+10;};
+  kv('Sub-Total '+CUR, money(t.sub));
+  kv('Discount'+(t.pct?' ('+(+t.pct.toFixed(2))+'%)':''), (t.disc?'-':'')+money(t.disc));
+  box(M+Math.round(W*0.35),y,Math.round(W*0.65),3,3); y+=10;
+  kv('TOTAL '+CUR, money(t.total), 36);
+  if(header.payment||header.paid||header.balance){
+    y+=4;
+    if(header.payment) kv('Payment', header.payment, 22);
+    kv('Paid', money(header.paid), 22);
+    kv('Balance', money(header.balance), 22);
+  }
+  y+=60;
+  box(M,y,Math.round(W*0.6),2,2); y+=8;
+  txt(M,y,W,22,"Receiver's Signature",'L'); y+=40;
+
+  const LL=y+30;
+  return ['^XA','^CI28','^PW'+PW,'^LL'+LL,'^LH0,0','^LT0','^MTD','^POI','^MNN'].concat(L).concat(['^PQ1','^XZ']).join('\n');
+}
+
+/* ---------- on-screen preview ---------- */
+function render(){
+  const v=$('view');
+  if(!header){ v.innerHTML='<div class="inv empty">No invoice data. Open this from the app\'s Print Invoice button.</div>'; $('btnPrint').disabled=true; return; }
+  const t=totals();
+  const rows=items.map(it=>'<tr><td class="c">'+escHtml(intS(it.sold))+'</td><td>'+escHtml(it.name)+'</td>'
+    +'<td class="n">'+escHtml(money(it.price))+'</td><td class="c">'+(num(it.ret)?escHtml(intS(it.ret)):'-')+'</td>'
+    +'<td class="n'+(num(it.amt)<0?' neg':'')+'">'+escHtml(money(it.amt))+'</td></tr>').join('');
+  const extra=(header.payment||header.paid||header.balance)
+    ? (header.payment?'<div class="r"><span>Payment</span><span>'+escHtml(header.payment)+'</span></div>':'')
+      +'<div class="r"><span>Paid</span><span>'+money(header.paid)+'</span></div>'
+      +'<div class="r"><span>Balance</span><span>'+money(header.balance)+'</span></div>' : '';
+  v.innerHTML='<div class="inv">'
+    +'<div class="lh"><div class="co">'+escHtml(CO)+'</div><div class="d">'+LH.map(escHtml).join('<br>')+'</div></div>'
+    +'<div class="ttl">INVOICE</div>'
+    +'<div class="meta"><span>No. <b>'+escHtml(header.inv)+'</b></span><span>Date: '+escHtml(header.date)+'</span></div>'
+    +'<div class="meta"><span>M/s <b style="color:#111">'+escHtml(header.client)+'</b></span></div>'
+    +(header.servedBy?'<div class="meta" style="color:#666"><span>Served by: '+escHtml(header.servedBy)+'</span></div>':'')
+    +'<table><thead><tr><th class="c">Qty</th><th>Description</th><th class="n">Price</th><th class="c">Ret</th><th class="n">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div class="sum"><div class="r"><span>Sub-Total '+CUR+'</span><span>'+money(t.sub)+'</span></div>'
+    +'<div class="r"><span>Discount'+(t.pct?' ('+(+t.pct.toFixed(2))+'%)':'')+'</span><span>'+(t.disc?'-':'')+money(t.disc)+'</span></div>'
+    +'<div class="r t"><span>TOTAL '+CUR+'</span><span>'+money(t.total)+'</span></div>'+extra+'</div>'
+    +'<div class="sig">Receiver\'s Signature</div></div>';
+  $('sub').textContent='Zebra ZQ320 · 72 mm · '+items.length+' line'+(items.length!==1?'s':'');
+}
+
+/* ---------- Bluetooth (same engine as the label page) ---------- */
+function setStatus(t, cls){ $('msg').textContent = t; $('dot').className = 'dot' + (cls ? ' ' + cls : ''); }
+function say(t){ logEl.style.display = 'block'; logEl.textContent += t + '\n'; }
+
+async function connect(){
+  if (!navigator.bluetooth) throw new Error('This browser has no Bluetooth. Use Chrome on Android.');
+  const SVC = $('svc').value.trim().toLowerCase();
+  if (device && device.gatt.connected && chWrite) return;
+  if (!device && navigator.bluetooth.getDevices){
+    try { const known = await navigator.bluetooth.getDevices(); const saved = localStorage.getItem('zq320.id'); device = known.find(d => d.id === saved) || null; } catch(e){}
+  }
+  if (!device){
+    setStatus('Choose your printer…', 'busy');
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }, { namePrefix: 'ZQ' }, { namePrefix: 'XX' }], optionalServices: [SVC] });
+    try { localStorage.setItem('zq320.id', device.id); } catch(e){}
+  }
+  setStatus('Connecting…', 'busy');
+  const gatt = await device.gatt.connect();
+  const svc  = await gatt.getPrimaryService(SVC);
+  chWrite    = await svc.getCharacteristic(ZEBRA_WRITE);
+  try { chRead = await svc.getCharacteristic(ZEBRA_READ); } catch(e){ chRead = null; }
+  if (chRead){ try { await chRead.readValue(); } catch(e){} }
+  device.addEventListener('gattserverdisconnected', () => { chWrite = null; setStatus('Printer disconnected', 'bad'); });
+  setStatus('Connected to ' + (device.name || 'printer'), 'ok');
+}
+
+async function send(text){
+  const bytes = new TextEncoder().encode(text);
+  const CHUNK = 20;
+  const noResp = typeof chWrite.writeValueWithoutResponse === 'function';
+  for (let i = 0; i < bytes.length; i += CHUNK){
+    const slice = bytes.slice(i, i + CHUNK);
+    noResp ? await chWrite.writeValueWithoutResponse(slice) : await chWrite.writeValue(slice);
+    if (chRead && i % (CHUNK * 40) === 0){ try { await chRead.readValue(); } catch(e){} }
+    setStatus(`Sending… ${Math.round((i / bytes.length) * 100)}%`, 'busy');
+  }
+}
+
+$('btnPrint').onclick = async () => {
+  $('btnPrint').disabled = true;
+  try { await connect(); await send(invoiceZpl()); setStatus('Receipt sent to the printer', 'ok'); }
+  catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
+  $('btnPrint').disabled = false;
+};
+
+$('btnCal').onclick = async () => {
+  try { setStatus('Calibrating… printer will feed', 'busy'); await connect(); await send('! U1 do "device.calibrate"\r\n'); setStatus('Calibration sent', 'ok'); }
+  catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); }
+};
+$('btnDiag').onclick = async () => {
+  logEl.style.display='block'; logEl.textContent='';
+  try {
+    const SVC=$('svc').value.trim().toLowerCase();
+    const d=await navigator.bluetooth.requestDevice({acceptAllDevices:true, optionalServices:[SVC]});
+    say('Device: '+(d.name||'(no name)')); const g=await d.gatt.connect();
+    for(const s of await g.getPrimaryServices()){ say('service '+s.uuid); for(const c of await s.getCharacteristics()){ say('   char '+c.uuid+' ['+Object.entries(c.properties).filter(([,v])=>v).map(([k])=>k).join(',')+']'); } }
+  } catch(e){ say('ERROR: '+(e.message||e)); }
+};
+$('btnZpl').onclick  = () => { logEl.style.display='block'; logEl.textContent = invoiceZpl(); };
+$('btnCopy').onclick = async () => { try { await navigator.clipboard.writeText(invoiceZpl()); setStatus('ZPL copied','ok'); } catch(e){} };
+$('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); device=null; chWrite=null; setStatus('Printer forgotten'); };
+$('btnRawbt').onclick = () => {
+  try {
+    const z = invoiceZpl();
+    if (!z) { setStatus('Nothing to print', 'bad'); return; }
+    const bytes = new TextEncoder().encode(z);
+    let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+    setStatus('Sending ' + z.length + ' bytes to RawBT...', 'busy');
+    location.href = 'rawbt:base64,' + btoa(s);
+  } catch (e) { setStatus('RawBT: ' + (e.message || e), 'bad'); }
+};
+
+/* ---------- go ---------- */
+parse();
+render();
+if(!navigator.bluetooth) setStatus('No Bluetooth in this browser — open in Chrome on Android','bad');
+</script>
+</body>
+</html>
