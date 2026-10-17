@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice Note</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#1d2433;--muted:#6b7280;--rec:#d92d20;--ok:#12805c;--btn:#1f6feb}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:420px;margin:0 auto;padding:24px 16px;text-align:center}
+  h1{font-size:20px;margin:4px 0}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:24px;word-break:break-word}
+  .card{background:var(--card);border-radius:16px;padding:24px 16px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  #rec{width:140px;height:140px;border-radius:50%;border:0;background:var(--rec);color:#fff;font-size:18px;font-weight:700;cursor:pointer}
+  #rec.on{animation:pulse 1.2s infinite}
+  @keyframes pulse{50%{box-shadow:0 0 0 18px rgba(217,45,32,.15)}}
+  #time{font-size:28px;font-variant-numeric:tabular-nums;margin:16px 0 8px}
+  audio{width:100%;margin:12px 0}
+  .row{display:flex;gap:10px;margin-top:8px}
+  .row button{flex:1;padding:14px;border-radius:10px;border:0;font-size:16px;font-weight:600;cursor:pointer}
+  #save{background:var(--btn);color:#fff}
+  #redo{background:#e5e7eb;color:var(--ink)}
+  #msg{margin-top:16px;font-size:15px;min-height:22px}
+  .ok{color:var(--ok);font-weight:700}.err{color:var(--rec)}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎤 Voice Note</h1>
+  <div class="sub" id="who"></div>
+  <div class="card">
+    <button id="rec">Record</button>
+    <div id="time">0:00</div>
+    <audio id="play" controls hidden></audio>
+    <div class="row" id="actions" hidden>
+      <button id="redo">Redo</button>
+      <button id="save">Save</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+const T = q.get('t') || 'Scans', ID = q.get('id') || '', S = q.get('s') || '', K = q.get('k') || '', N = q.get('n') || '';
+document.getElementById('who').textContent = (N ? N + ' · ' : '') + T + ' ' + ID;
+const recBtn = document.getElementById('rec'), timeEl = document.getElementById('time'),
+      play = document.getElementById('play'), actions = document.getElementById('actions'),
+      msg = document.getElementById('msg');
+let mr = null, chunks = [], blob = null, t0 = 0, tick = null, stream = null;
+
+function say(text, cls) { msg.textContent = text; msg.className = cls || ''; }
+if (!ID || !S || !K) { say('Link is incomplete — open this from the app.', 'err'); recBtn.disabled = true; }
+
+recBtn.onclick = async () => {
+  if (mr && mr.state === 'recording') { mr.stop(); return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) { say('Microphone blocked — allow it in the browser and try again.', 'err'); return; }
+  chunks = []; blob = null; play.hidden = true; actions.hidden = true; say('');
+  mr = new MediaRecorder(stream);
+  mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  mr.onstop = () => {
+    clearInterval(tick); stream.getTracks().forEach(t => t.stop());
+    blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
+    play.src = URL.createObjectURL(blob); play.hidden = false; actions.hidden = false;
+    recBtn.classList.remove('on'); recBtn.textContent = 'Record';
+  };
+  mr.start(); t0 = Date.now();
+  recBtn.classList.add('on'); recBtn.textContent = 'Stop';
+  tick = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    timeEl.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    if (s >= 180) mr.stop();
+  }, 250);
+};
+
+document.getElementById('redo').onclick = () => { blob = null; play.hidden = true; actions.hidden = true; timeEl.textContent = '0:00'; say(''); };
+
+document.getElementById('save').onclick = async () => {
+  if (!blob) return;
+  const btn = document.getElementById('save'); btn.disabled = true; say('Saving…');
+  try {
+    const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+    const resp = await fetch(S, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ k: K, t: T, id: ID, mime: blob.type, b64 }) });
+    const j = await resp.json();
+    if (j.ok) { say('✓ Saved. Go back to the app and sync.', 'ok'); actions.hidden = true; recBtn.disabled = true; }
+    else { say('Not saved: ' + j.error, 'err'); btn.disabled = false; }
+  } catch (e) { say('Not saved — check the connection and press Save again.', 'err'); btn.disabled = false; }
+};
+</script>
+</body>
+</html>
