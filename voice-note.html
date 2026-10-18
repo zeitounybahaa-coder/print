@@ -57,7 +57,14 @@ recBtn.onclick = async () => {
   if (mr && mr.state === 'recording') { mr.stop(); return; }
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) { say('Microphone blocked — allow it in the browser and try again.', 'err'); return; }
+  } catch (e) {
+    var denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    msg.className = 'err';
+    msg.innerHTML = denied
+      ? 'Microphone blocked.<br>1. Tap the icon left of the address bar.<br>2. Permissions → Microphone → Allow.<br>3. Reload this page and tap Record.<br><small>Still blocked: Android Settings → Apps → Chrome → Permissions → Microphone → Allow only while using the app.</small>'
+      : 'No microphone found or it is in use by another app. Close other apps and try again.';
+    return;
+  }
   chunks = []; blob = null; play.hidden = true; actions.hidden = true; say('');
   mr = new MediaRecorder(stream);
   mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
