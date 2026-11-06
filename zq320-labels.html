@@ -133,7 +133,7 @@ const CUR  = qs.get('cur') || '$';
 const W_MM  = +(qs.get('w') || 60);                            // the stock in use is 60 x 40 mm
 const H_MM  = +(qs.get('h') || 40);                            // drives ^LL, which is what stops the feed
 const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print width = 576 dots
-const LL   = Math.round(H_MM * DPMM);
+const LL   = Math.round(H_MM * DPMM);  const XC = Math.round((576 - PW) / 2);  // centres the narrower label under the 72 mm head
 
 const $ = id => document.getElementById(id);
 
@@ -227,7 +227,7 @@ function labelZpl(it){
   const mode  = priceMode();
   const price = money(mode === 'carton' ? it.pkgPrice : it.price);
   const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
-  const M = 24, W = PW - 2 * M;                    // safe left/right margin + usable width
+  const M = 24, W = PW - 2 * M, NS = String(it.name || '').length > 44 ? 26 : 32;                    // safe left/right margin + usable width
 
   // No ^LL: the printer uses its own calibrated label length, so content fits
   // any label the printer has measured (tap "Calibrate printer" once first).
@@ -236,18 +236,18 @@ function labelZpl(it){
   return [
     '^XA',
     '^CI28',                                       // UTF-8 in
-    `^PW576`, `^LH${Math.max(0, OX)},${OY}`, `^LS${Math.max(0, -OX)}`, '^LT0', '^MTD',
+    `^PW576`, `^LH${Math.max(0, XC + OX)},${OY}`, `^LS${Math.max(0, -(XC + OX))}`, '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
     /* Measured on the real printer, 22 Sep: with ^MNY (gap sensing) it prints one good
        label and then feeds five blank ones, calibrated or not — this ZQ320's gap sensor
        does not find the liner gaps. With ^MNN and an explicit ^LL it stops dead on the
        first label. So we drive the length ourselves and never ask the sensor. */
     `^MNN^LL${LL}`,
-    head  ? `^FO${M},10^A0N,20,20^FB${W},1,0,L^FD${head}^FS` : '',
-    `^FO${M},34^A0N,30,30^FB${W},2,2,L^FD${esc(it.name)}^FS`,
-    barcodeZpl(M + 16, 98, it.barcode, 52),
-    pkg   ? `^FO${M},176^A0N,20,20^FB300,1,0,L^FD${pkg}^FS` : '',
-    price ? `^FO${M},166^A0N,48,48^FB${W},1,0,R^FD${price}^FS` : '',
+    head  ? `^FO${M},12^A0N,22,22^FB${W},1,0,L^FD${head}^FS` : '',
+    `^FO${M},40^A0N,${NS},${NS}^FB${W},2,2,L^FD${esc(it.name)}^FS`,
+    barcodeZpl(M + 16, 112, it.barcode, 56),
+    pkg   ? `^FO${M},236^A0N,24,24^FB300,1,0,L^FD${pkg}^FS` : '',
+    price ? `^FO${M},206^A0N,60,60^FB${W},1,0,R^FD${price}^FS` : '',
     `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
   ].filter(Boolean).join('\n');
@@ -342,20 +342,20 @@ function wrap2(s, chars){
 }
 
 function stickerSvg(it){
-  const M = 24, W = PW - 2 * M;
+  const M = 24, W = PW - 2 * M, NS = String(it.name || '').length > 44 ? 26 : 32;
   const head  = esc(it.cat);
   const mode  = priceMode();
   const price = money(mode === 'carton' ? it.pkgPrice : it.price);
   const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
-  const lines = wrap2(esc(it.name), Math.floor(W / (30 * 0.55)));
+  const lines = wrap2(esc(it.name), Math.floor(W / (NS * 0.55)));
   let g = '';
-  if (head) g += '<text x="' + M + '" y="28" font-size="20">' + escHtml(head) + '</text>';
+  if (head) g += '<text x="' + M + '" y="32" font-size="22">' + escHtml(head) + '</text>';
   lines.forEach(function(ln, i){
-    g += '<text x="' + M + '" y="' + (60 + i*32) + '" font-size="30" font-weight="600">' + escHtml(ln) + '</text>';
+    g += '<text x="' + M + '" y="' + (69 + i*(NS + 2)) + '" font-size="' + NS + '" font-weight="600">' + escHtml(ln) + '</text>';
   });
-  g += barsSvg(it.barcode, M + 16, 98, 52);
-  if (pkg)   g += '<text x="' + M + '" y="194" font-size="20">' + escHtml(pkg) + '</text>';
-  if (price) g += '<text x="' + (M + W) + '" y="206" font-size="48" font-weight="700" text-anchor="end">' + escHtml(price) + '</text>';
+  g += barsSvg(it.barcode, M + 16, 112, 56);
+  if (pkg)   g += '<text x="' + M + '" y="258" font-size="24">' + escHtml(pkg) + '</text>';
+  if (price) g += '<text x="' + (M + W) + '" y="260" font-size="60" font-weight="700" text-anchor="end">' + escHtml(price) + '</text>';
   return '<svg viewBox="0 0 ' + PW + ' ' + LL + '" xmlns="http://www.w3.org/2000/svg" fill="#111" font-family="system-ui,Arial,sans-serif">'
        + '<rect x="0.5" y="0.5" width="' + (PW-1) + '" height="' + (LL-1) + '" fill="#fff" stroke="#d0d3d8"/>'
        + g + '</svg>';
