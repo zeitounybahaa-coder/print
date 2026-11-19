@@ -66,7 +66,7 @@
 <body>
 
 <h1>Sticker Print</h1>
-<div class="sub" id="sub">Zebra ZQ320 · 76 × 25 mm · 203 dpi</div>
+<div class="sub" id="sub">Zebra ZQ320 · 203 dpi</div>
 <div class="seglab">Price on the sticker</div>
 <div class="seg" id="seg">
   <button data-mode="unit">Per unit</button>
@@ -104,6 +104,10 @@
     <button class="nb" data-ax="y" data-d="-8">&minus;</button>
     <b id="oyv">0</b>
     <button class="nb" data-ax="y" data-d="8">+</button>
+    <span>Tear</span>
+    <button class="nb" data-ax="t" data-d="-8">&minus;</button>
+    <b id="otv">12</b>
+    <button class="nb" data-ax="t" data-d="8">+</button>
   </div>
   <button class="primary" id="btnPrint">Print</button>
   <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print via RawBT (test)</button>
@@ -134,31 +138,41 @@ const W_MM  = +(qs.get('w') || 60);                            // the stock in u
 const H_MM  = +(qs.get('h') || 40);                            // drives ^LL, which is what stops the feed
 const PW   = Math.min(Math.round(W_MM * DPMM), 576);        // ZQ320 max print width = 576 dots
 const LL   = Math.round(H_MM * DPMM);  const XC = Math.round((576 - PW) / 2);  // centres the narrower label under the 72 mm head
+/* The feed per label must be label + liner gap, not the label alone. Feeding only
+   the 40 mm label made every next label start a little earlier and the content
+   crept down the roll until the price fell off the bottom (photos 19 Nov). */
+const GAP_MM = +(qs.get('gap') || 3);
+const LLP  = Math.round((H_MM + GAP_MM) * DPMM);
 
 const $ = id => document.getElementById(id);
 
 /* Where the label actually sits under the printhead is a physical thing — it varies by
    printer and by how the roll is seated, so it cannot be computed here. These two nudges
    move the whole label via ^LH, 1 mm per tap, and stick per device. */
-let OX = 0, OY = 0;
+let OX = 0, OY = 0, TEAR = 96;   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
 try {
   OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
   OY = parseInt(localStorage.getItem('zq320.oy') || '0', 10) || 0;
+  const t = localStorage.getItem('zq320.tear');
+  if (t !== null) TEAR = parseInt(t, 10) || 0;
 } catch (e){}
 
 function showNudge(){
-  const x = $('oxv'), y = $('oyv');
+  const x = $('oxv'), y = $('oyv'), t = $('otv');
   if (x) x.textContent = (OX / 8).toFixed(0) + ' mm';
   if (y) y.textContent = (OY / 8).toFixed(0) + ' mm';
+  if (t) t.textContent = (TEAR / 8).toFixed(0) + ' mm';
 }
 document.querySelectorAll('.nb').forEach(b => {
   b.addEventListener('click', () => {
     const step = +b.dataset.d;
-    if (b.dataset.ax === 'x') OX = Math.max(-160, Math.min(160, OX + step));
-    else                      OY = Math.max(-160, Math.min(160, OY + step));
+    if (b.dataset.ax === 'x')      OX = Math.max(-160, Math.min(160, OX + step));
+    else if (b.dataset.ax === 't') TEAR = Math.max(-120, Math.min(120, TEAR + step));
+    else                           OY = Math.max(-160, Math.min(160, OY + step));
     try {
       localStorage.setItem('zq320.ox', String(OX));
       localStorage.setItem('zq320.oy', String(OY));
+      localStorage.setItem('zq320.tear', String(TEAR));
     } catch (e){}
     showNudge();
   });
@@ -204,56 +218,61 @@ function checkOK(d){
 }
 
 // Let the printer draw the barcode natively — sharper than any image, and it scans.
-// EAN-13/UPC-A print their guard digits OUTSIDE the bars, so they need a left margin
-// or the first digit gets clipped off the edge of the label.
-function barcodeZpl(x, y, val, h){
+// Width in dots at ^BY2, so the barcode can be centred on the label.
+function isUpcEan(v){ return /^\d+$/.test(v) && (v.length === 13 || v.length === 12) && checkOK(v); }
+function barWidth(v){
+  if (isUpcEan(v)) return 190;                                     // 95 modules x 2 dots
+  const n = /^\d+$/.test(v) ? Math.ceil(v.length / 2) : v.length;  // Code 128: digits pack two per symbol
+  return (11 * (n + 2) + 13) * 2;                                  // data + start + check, stop, x 2 dots
+}
+function barcodeZpl(y, val, h){
   const v = esc(val);
   if (!v) return '';
-  const numeric = /^\d+$/.test(v);
-  if (numeric && v.length === 13 && checkOK(v)) return `^FO${x + 20},${y}^BY2,2.5,${h}^BEN,${h},Y,N^FD${v}^FS`;
-  if (numeric && v.length === 12 && checkOK(v)) return `^FO${x + 20},${y}^BY2,2.5,${h}^BUN,${h},Y,N,Y^FD${v}^FS`;
-  return `^FO${x},${y}^BY2,2.5,${h}^BCN,${h},Y,N,N^FD${v}^FS`;                // Code 128 — takes anything
+  const x = Math.max(16, Math.round((PW - barWidth(v)) / 2));
+  if (isUpcEan(v) && v.length === 13) return `^FO${x},${y}^BY2,2.5,${h}^BEN,${h},Y,N^FD${v}^FS`;
+  if (isUpcEan(v))                    return `^FO${x},${y}^BY2,2.5,${h}^BUN,${h},Y,N,Y^FD${v}^FS`;
+  return `^FO${x},${y}^BY2,2.5,${h}^BCN,${h},Y,N,N,A^FD${v}^FS`;   // Code 128 — takes anything
 }
 
-/* Layout for 76 x 38 mm (576 x 304 dots @ 203 dpi).
-   ^POI: the ZQ320 feeds bottom-first, so invert 180° to read upright when peeled.
-   All content stays inside a safe margin so the flip never clips an edge.
-     y  10- 32  code | category   (small, top strip)
-     y  34-100  item name         (up to 2 lines, full width)
-     y 108-200  barcode + human-readable digits
-     y 206-264  price (large, right)  +  package unit/price (small, left)            */
-function labelZpl(it){
-  const head  = esc(it.cat);
+/* Layout copied from the old shelf labels (photos 19 Nov): everything centred,
+   so nothing is pushed against the right edge whatever the real label width.
+     y  18- 48  item name   — one line, cut to fit, like the old system
+     y  60-178  barcode + digits
+     y 192-272  price       — large, centred
+     y 266-292  carton unit/price (only in "Both")
+   ^POI: the ZQ320 feeds bottom-first, so invert 180° to read upright when peeled. */
+const NAME_CH = Math.floor((PW - 32) / 18);
+const nameLine = s => { s = esc(s); return s.length > NAME_CH ? s.slice(0, NAME_CH).trim() : s; };
+
+function labelParts(it){
   const mode  = priceMode();
   const price = money(mode === 'carton' ? it.pkgPrice : it.price);
   const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
-  const M = 24, W = PW - 2 * M, NS = String(it.name || '').length > 44 ? 26 : 32;                    // safe left/right margin + usable width
+  return { name: nameLine(it.name), price, pkg, PS: pkg ? 66 : 80 };
+}
 
-  // No ^LL: the printer uses its own calibrated label length, so content fits
-  // any label the printer has measured (tap "Calibrate printer" once first).
-  // Everything is kept inside ~216 dots and away from the edges so the 180°
-  // flip (^POI) never clips, whatever the true label length turns out to be.
+function labelZpl(it){
+  const p = labelParts(it);
   return [
     '^XA',
     '^CI28',                                       // UTF-8 in
     `^PW576`, `^LH${Math.max(0, XC + OX)},${OY}`, `^LS${Math.max(0, -(XC + OX))}`, '^LT0', '^MTD',
     '^POI',                                        // invert — matches the ZQ320's feed direction
-    /* Measured on the real printer, 22 Sep: with ^MNY (gap sensing) it prints one good
-       label and then feeds five blank ones, calibrated or not — this ZQ320's gap sensor
-       does not find the liner gaps. With ^MNN and an explicit ^LL it stops dead on the
-       first label. So we drive the length ourselves and never ask the sensor. */
-    `^MNN^LL${LL}`,
-    head  ? `^FO${M},12^A0N,22,22^FB${W},1,0,L^FD${head}^FS` : '',
-    `^FO${M},40^A0N,${NS},${NS}^FB${W},2,2,L^FD${esc(it.name)}^FS`,
-    barcodeZpl(M + 16, 112, it.barcode, 56),
-    pkg   ? `^FO${M},236^A0N,24,24^FB300,1,0,L^FD${pkg}^FS` : '',
-    price ? `^FO${M},206^A0N,60,60^FB${W},1,0,R^FD${price}^FS` : '',
+    /* Gap sensing is unreliable on this ZQ320 (22 Sep), so the feed is driven by length:
+       label + gap per sticker. ^MMT = tear-off mode, so ~TA (sent before the job)
+       moves the last sticker forward past the tear bar instead of stopping inside. */
+    `^MNN^LL${LLP}^MMT`,
+    `^FO0,18^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
+    barcodeZpl(60, it.barcode, 92),
+    p.price ? `^FO0,192^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
+    p.pkg   ? `^FO0,266^A0N,26,26^FB${PW},1,0,C^FD${p.pkg}^FS` : '',
     `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
   ].filter(Boolean).join('\n');
 }
 
-const allZpl = () => items.map(labelZpl).join('\n');
+const tearCmd = () => '~TA' + (TEAR < 0 ? '-' + String(-TEAR).padStart(2, '0') : String(TEAR).padStart(3, '0'));
+const allZpl = () => items.length ? tearCmd() + '\n' + items.map(labelZpl).join('\n') : '';
 
 /* ---------- UI ---------- */
 function setStatus(text, cls){
@@ -311,7 +330,7 @@ function barsSvg(raw, x, y, h){
     let r = '';
     for (let i = 0; i < bits.length; i++)
       if (bits[i] === '1') r += '<rect x="' + (x + i*mod) + '" y="' + y + '" width="' + mod + '" height="' + h + '"/>';
-    const num = d.length === 12 ? d + ean13Check(d) : d;
+    const num = d;                                  // 12-digit UPC already carries its check digit
     r += '<text x="' + (x + bits.length*mod/2) + '" y="' + (y + h + 20) + '" font-size="20" text-anchor="middle" font-family="monospace" letter-spacing="2">' + escHtml(num) + '</text>';
     return r;
   }
@@ -342,20 +361,12 @@ function wrap2(s, chars){
 }
 
 function stickerSvg(it){
-  const M = 24, W = PW - 2 * M, NS = String(it.name || '').length > 44 ? 26 : 32;
-  const head  = esc(it.cat);
-  const mode  = priceMode();
-  const price = money(mode === 'carton' ? it.pkgPrice : it.price);
-  const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
-  const lines = wrap2(esc(it.name), Math.floor(W / (NS * 0.55)));
+  const p = labelParts(it), C = PW / 2, bv = esc(it.barcode);
   let g = '';
-  if (head) g += '<text x="' + M + '" y="32" font-size="22">' + escHtml(head) + '</text>';
-  lines.forEach(function(ln, i){
-    g += '<text x="' + M + '" y="' + (69 + i*(NS + 2)) + '" font-size="' + NS + '" font-weight="600">' + escHtml(ln) + '</text>';
-  });
-  g += barsSvg(it.barcode, M + 16, 112, 56);
-  if (pkg)   g += '<text x="' + M + '" y="258" font-size="24">' + escHtml(pkg) + '</text>';
-  if (price) g += '<text x="' + (M + W) + '" y="260" font-size="60" font-weight="700" text-anchor="end">' + escHtml(price) + '</text>';
+  if (p.name)  g += '<text x="' + C + '" y="44" font-size="30" text-anchor="middle">' + escHtml(p.name) + '</text>';
+  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 60, 92);
+  if (p.price) g += '<text x="' + C + '" y="' + (192 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
+  if (p.pkg)   g += '<text x="' + C + '" y="288" font-size="26" text-anchor="middle">' + escHtml(p.pkg) + '</text>';
   return '<svg viewBox="0 0 ' + PW + ' ' + LL + '" xmlns="http://www.w3.org/2000/svg" fill="#111" font-family="system-ui,Arial,sans-serif">'
        + '<rect x="0.5" y="0.5" width="' + (PW-1) + '" height="' + (LL-1) + '" fill="#fff" stroke="#d0d3d8"/>'
        + g + '</svg>';
