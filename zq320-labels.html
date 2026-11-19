@@ -83,6 +83,8 @@
     <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
     <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
     <div class="tools">
+      <button class="ghost" id="btnGap">Set up gap sensing (once)</button>
+      <button class="ghost" id="btnLen">Back to fixed length</button>
       <button class="ghost" id="btnCal">Calibrate printer</button>
       <button class="ghost" id="btnDiag">Inspect printer services</button>
       <button class="ghost" id="btnZpl">Show ZPL</button>
@@ -149,6 +151,8 @@ const $ = id => document.getElementById(id);
 /* Where the label actually sits under the printhead is a physical thing — it varies by
    printer and by how the roll is seated, so it cannot be computed here. These two nudges
    move the whole label via ^LH, 1 mm per tap, and stick per device. */
+let MEDIA = 'length';          // 'gap' once the printer's gap sensor is set up, else fixed length
+try { MEDIA = localStorage.getItem('zq320.media') || 'length'; } catch (e){}
 let OX = 0, OY = 0, TEAR = 96;   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
 try {
   OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
@@ -248,7 +252,7 @@ function labelParts(it){
   const mode  = priceMode();
   const price = money(mode === 'carton' ? it.pkgPrice : it.price);
   const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
-  return { name: nameLine(it.name), price, pkg, PS: pkg ? 66 : 80 };
+  return { name: nameLine(it.name), price, pkg, PS: pkg ? 60 : 72 };
 }
 
 function labelZpl(it){
@@ -261,11 +265,12 @@ function labelZpl(it){
     /* Gap sensing is unreliable on this ZQ320 (22 Sep), so the feed is driven by length:
        label + gap per sticker. ^MMT = tear-off mode, so ~TA (sent before the job)
        moves the last sticker forward past the tear bar instead of stopping inside. */
-    `^MNN^LL${LLP}^MMT`,
-    `^FO0,18^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
-    barcodeZpl(60, it.barcode, 92),
-    p.price ? `^FO0,192^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
-    p.pkg   ? `^FO0,266^A0N,26,26^FB${PW},1,0,C^FD${p.pkg}^FS` : '',
+    MEDIA === 'gap' ? `^MNY^LL${LL}^MMT`          // printer finds each label edge itself
+                    : `^MNN^LL${LLP}^MMT`,        // fixed length: start point = wherever the paper rests
+    `^FO0,14^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
+    barcodeZpl(52, it.barcode, 80),
+    p.price ? `^FO0,164^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
+    p.pkg   ? `^FO0,230^A0N,26,26^FB${PW},1,0,C^FD${p.pkg}^FS` : '',
     `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
   ].filter(Boolean).join('\n');
@@ -363,10 +368,10 @@ function wrap2(s, chars){
 function stickerSvg(it){
   const p = labelParts(it), C = PW / 2, bv = esc(it.barcode);
   let g = '';
-  if (p.name)  g += '<text x="' + C + '" y="44" font-size="30" text-anchor="middle">' + escHtml(p.name) + '</text>';
-  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 60, 92);
-  if (p.price) g += '<text x="' + C + '" y="' + (192 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
-  if (p.pkg)   g += '<text x="' + C + '" y="288" font-size="26" text-anchor="middle">' + escHtml(p.pkg) + '</text>';
+  if (p.name)  g += '<text x="' + C + '" y="40" font-size="30" text-anchor="middle">' + escHtml(p.name) + '</text>';
+  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 52, 80);
+  if (p.price) g += '<text x="' + C + '" y="' + (164 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
+  if (p.pkg)   g += '<text x="' + C + '" y="252" font-size="26" text-anchor="middle">' + escHtml(p.pkg) + '</text>';
   return '<svg viewBox="0 0 ' + PW + ' ' + LL + '" xmlns="http://www.w3.org/2000/svg" fill="#111" font-family="system-ui,Arial,sans-serif">'
        + '<rect x="0.5" y="0.5" width="' + (PW-1) + '" height="' + (LL-1) + '" fill="#fff" stroke="#d0d3d8"/>'
        + g + '</svg>';
@@ -539,6 +544,31 @@ $('btnDiag').onclick = async () => {
 
 /* One-time media calibration — the printer feeds and measures the label + gap,
    which stops the extra blank labels and fixes top-of-form. */
+/* One-time: tell the ZQ320 it has gapped labels and let it measure them. After this
+   every sticker starts at the real label edge, so nothing creeps into the gap and
+   the gap — not the middle of a label — stops at the tear bar. Stored in the printer. */
+$('btnGap').onclick = async () => {
+  try {
+    setStatus('Setting up gap sensing… printer will feed 2–3 labels', 'busy');
+    await connect();
+    await send('! U1 setvar "media.type" "label"\r\n'
+             + '! U1 setvar "media.sense_mode" "gap"\r\n'
+             + '! U1 setvar "ezpl.media_type" "web"\r\n'
+             + '~TA000\r\n'
+             + '! U1 do "device.calibrate" ""\r\n');
+    await new Promise(r => setTimeout(r, 2000));
+    MEDIA = 'gap'; TEAR = 0;
+    try { localStorage.setItem('zq320.media', 'gap'); localStorage.setItem('zq320.tear', '0'); } catch (e){}
+    showNudge(); release();
+    setStatus('Gap sensing on — print 2 stickers to check', 'ok');
+  } catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); release(); }
+};
+$('btnLen').onclick = () => {
+  MEDIA = 'length'; TEAR = 96;
+  try { localStorage.setItem('zq320.media', 'length'); localStorage.setItem('zq320.tear', '96'); } catch (e){}
+  showNudge(); setStatus('Back to fixed length (40 mm per sticker)', 'ok');
+};
+
 $('btnCal').onclick = async () => {
   try {
     setStatus('Calibrating… printer will feed a label', 'busy');
