@@ -112,7 +112,7 @@
     <button class="nb" data-ax="t" data-d="8">+</button>
   </div>
   <button class="primary" id="btnPrint">Print</button>
-  <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print via RawBT (test)</button>
+  <button class="ghost" id="btnRawbt" style="width:100%; margin-top:8px">Print direct (no RawBT)</button>
 </div>
 
 <script>
@@ -508,8 +508,9 @@ async function send(text){
   }
 }
 
-$('btnPrint').onclick = async () => {
-  $('btnPrint').disabled = true;
+/* Secondary: direct Web Bluetooth from Chrome (printer must NOT be paired in Android). */
+$('btnRawbt').onclick = async () => {
+  $('btnRawbt').disabled = true;
   try {
     await connect();
 
@@ -525,7 +526,7 @@ $('btnPrint').onclick = async () => {
     say('ERROR: ' + (e.message || e));
     release();
   }
-  $('btnPrint').disabled = false;
+  $('btnRawbt').disabled = false;
 };
 
 /* Ask the printer what it actually offers — beats guessing at UUIDs. */
@@ -597,7 +598,8 @@ $('btnCal').onclick = async () => {
 $('btnZpl').onclick   = () => { logEl.style.display = 'block'; logEl.textContent = allZpl(); };
 $('btnCopy').onclick  = async () => { try { await navigator.clipboard.writeText(allZpl()); setStatus('ZPL copied', 'ok'); } catch(e){} };
 $('btnForget').onclick = () => { localStorage.removeItem('zq320.id'); localStorage.removeItem('zq320.calibrated'); device = null; chWrite = null; setStatus('Printer forgotten — next print will ask again'); };
-$('btnRawbt').onclick = () => {
+/* Main Print button = RawBT app (classic Bluetooth). This is the path that works on the shop phones (19 Nov). */
+$('btnPrint').onclick = () => {
   try {
     const z = allZpl();
     if (!z) { setStatus('Nothing to print', 'bad'); return; }
