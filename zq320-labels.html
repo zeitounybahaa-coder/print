@@ -152,8 +152,8 @@ const $ = id => document.getElementById(id);
    printer and by how the roll is seated, so it cannot be computed here. These two nudges
    move the whole label via ^LH, 1 mm per tap, and stick per device. */
 let MEDIA = 'length';          // 'gap' once the printer's gap sensor is set up, else fixed length
-try { MEDIA = localStorage.getItem('zq320.media') || 'gap'; } catch (e){}   // printer set up for gap sensing 19 Nov
-let OX = 0, OY = 0, TEAR = 32;   // 4 mm: gap lands on the tear bar in gap mode (measured 19 Nov)   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
+try { MEDIA = localStorage.getItem('zq320.media') || 'length'; } catch (e){}   // gap sensing fed blank labels on this ZQ320 (22 Sep, 19 Nov x2)
+let OX = 0, OY = 0, TEAR = 96;   // 12 mm tear-off feed in fixed-length mode   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
 try {
   OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
   OY = parseInt(localStorage.getItem('zq320.oy') || '0', 10) || 0;
@@ -567,10 +567,18 @@ $('btnGap').onclick = async () => {
     setStatus('Gap sensing on — print 2 stickers to check', 'ok');
   } catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); release(); }
 };
-$('btnLen').onclick = () => {
+/* Undo gap sensing in the printer too, so the feed button and power-up stop hunting for gaps. */
+$('btnLen').onclick = async () => {
+  try {
+    setStatus('Switching printer back to fixed length…', 'busy');
+    await connect();
+    await send('! U1 setvar "ezpl.media_type" "continuous"\r\n');
+    await new Promise(r => setTimeout(r, 1500));
+    release();
+  } catch (e){ say('ERROR: ' + (e.message || e)); release(); }
   MEDIA = 'length'; TEAR = 96;
   try { localStorage.setItem('zq320.media', 'length'); localStorage.setItem('zq320.tear', '96'); } catch (e){}
-  showNudge(); setStatus('Back to fixed length (40 mm per sticker)', 'ok');
+  showNudge(); setStatus('Fixed length on (40 mm per sticker)', 'ok');
 };
 
 $('btnCal').onclick = async () => {
