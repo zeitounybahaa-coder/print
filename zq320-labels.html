@@ -245,14 +245,15 @@ function barcodeZpl(y, val, h){
      y 192-272  price       — large, centred
      y 266-292  carton unit/price (only in "Both")
    ^POI: the ZQ320 feeds bottom-first, so invert 180° to read upright when peeled. */
-const NAME_CH = Math.floor((PW - 32) / 18);
-const nameLine = s => { s = esc(s); return s.length > NAME_CH ? s.slice(0, NAME_CH).trim() : s; };
+/* Name on up to two lines (19 Nov), word-wrapped, each line centred. Size 26 ≈ 16 dots/char. */
+const NAME_CH = Math.floor((PW - 32) / 16);
+const nameLines = s => wrap2(esc(s), NAME_CH).map(l => l.length > NAME_CH ? l.slice(0, NAME_CH) : l);
 
 function labelParts(it){
   const mode  = priceMode();
   const price = money(mode === 'carton' ? it.pkgPrice : it.price);
   const pkg   = mode === 'both' ? [esc(it.pkgUnit), money(it.pkgPrice)].filter(Boolean).join('  ') : '';
-  return { name: nameLine(it.name), price, pkg, PS: pkg ? 60 : 72 };
+  return { lines: nameLines(it.name), price, pkg, PS: pkg ? 56 : 64 };
 }
 
 function labelZpl(it){
@@ -272,9 +273,10 @@ function labelZpl(it){
        ^ML360 (45 mm) caps any gap hunt to about one label. */
     MEDIA === 'gap' ? '^MNY^ML360^MMT'            // printer finds each label edge itself
                     : `^MNN^LL${LLP}^MMT`,        // fixed length: start point = wherever the paper rests
-    `^FO0,38^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
-    barcodeZpl(76, it.barcode, 80),
-    p.price ? `^FO0,188^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
+    /* y 30-84 name (1-2 lines) · y 92-178 barcode + digits · y 186-250 price · y 254-280 carton */
+    ...p.lines.map((l, i) => `^FO0,${(p.lines.length === 1 ? 44 : 30) + i * 28}^A0N,26,26^FB${PW},1,0,C^FD${l}^FS`),
+    barcodeZpl(92, it.barcode, 64),
+    p.price ? `^FO0,186^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
     p.pkg   ? `^FO0,254^A0N,26,26^FB${PW},1,0,C^FD${p.pkg}^FS` : '',
     `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
@@ -373,9 +375,9 @@ function wrap2(s, chars){
 function stickerSvg(it){
   const p = labelParts(it), C = PW / 2, bv = esc(it.barcode);
   let g = '';
-  if (p.name)  g += '<text x="' + C + '" y="64" font-size="30" text-anchor="middle">' + escHtml(p.name) + '</text>';
-  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 76, 80);
-  if (p.price) g += '<text x="' + C + '" y="' + (188 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
+  p.lines.forEach(function(l, i){ g += '<text x="' + C + '" y="' + ((p.lines.length === 1 ? 44 : 30) + i * 28 + 22) + '" font-size="26" text-anchor="middle">' + escHtml(l) + '</text>'; });
+  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 92, 64);
+  if (p.price) g += '<text x="' + C + '" y="' + (186 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
   if (p.pkg)   g += '<text x="' + C + '" y="276" font-size="26" text-anchor="middle">' + escHtml(p.pkg) + '</text>';
   return '<svg viewBox="0 0 ' + PW + ' ' + LL + '" xmlns="http://www.w3.org/2000/svg" fill="#111" font-family="system-ui,Arial,sans-serif">'
        + '<rect x="0.5" y="0.5" width="' + (PW-1) + '" height="' + (LL-1) + '" fill="#fff" stroke="#d0d3d8"/>'
