@@ -141,7 +141,7 @@ const LL   = Math.round(H_MM * DPMM);  const XC = Math.round((576 - PW) / 2);  /
 /* The feed per label must be label + liner gap, not the label alone. Feeding only
    the 40 mm label made every next label start a little earlier and the content
    crept down the roll until the price fell off the bottom (photos 19 Nov). */
-const GAP_MM = +(qs.get('gap') || 3);
+const GAP_MM = +(qs.get('gap') || 0);              // 19 Nov test: h=40 already equals label+gap pitch on this roll
 const LLP  = Math.round((H_MM + GAP_MM) * DPMM);
 
 const $ = id => document.getElementById(id);
