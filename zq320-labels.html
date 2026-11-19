@@ -265,7 +265,11 @@ function labelZpl(it){
     /* Gap sensing is unreliable on this ZQ320 (22 Sep), so the feed is driven by length:
        label + gap per sticker. ^MMT = tear-off mode, so ~TA (sent before the job)
        moves the last sticker forward past the tear bar instead of stopping inside. */
-    MEDIA === 'gap' ? `^MNY^LL${LL}^MMT`          // printer finds each label edge itself
+    /* Gap mode: NO ^LL. The roll is 40 mm pitch but the label itself is ~37 mm; sending
+       ^LL320 made each format run over the gap and the printer lost the edge and fed
+       blank labels (19 Nov). The printer uses the length it measured at calibration.
+       ^ML360 (45 mm) caps any gap hunt to about one label. */
+    MEDIA === 'gap' ? '^MNY^ML360^MMT'            // printer finds each label edge itself
                     : `^MNN^LL${LLP}^MMT`,        // fixed length: start point = wherever the paper rests
     `^FO0,38^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
     barcodeZpl(76, it.barcode, 80),
