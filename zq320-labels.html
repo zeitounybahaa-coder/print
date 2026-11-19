@@ -152,8 +152,8 @@ const $ = id => document.getElementById(id);
    printer and by how the roll is seated, so it cannot be computed here. These two nudges
    move the whole label via ^LH, 1 mm per tap, and stick per device. */
 let MEDIA = 'length';          // 'gap' once the printer's gap sensor is set up, else fixed length
-try { MEDIA = localStorage.getItem('zq320.media') || 'length'; } catch (e){}
-let OX = 0, OY = 0, TEAR = 96;   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
+try { MEDIA = localStorage.getItem('zq320.media') || 'gap'; } catch (e){}   // printer set up for gap sensing 19 Nov
+let OX = 0, OY = 0, TEAR = 32;   // 4 mm: gap lands on the tear bar in gap mode (measured 19 Nov)   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
 try {
   OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
   OY = parseInt(localStorage.getItem('zq320.oy') || '0', 10) || 0;
@@ -267,10 +267,10 @@ function labelZpl(it){
        moves the last sticker forward past the tear bar instead of stopping inside. */
     MEDIA === 'gap' ? `^MNY^LL${LL}^MMT`          // printer finds each label edge itself
                     : `^MNN^LL${LLP}^MMT`,        // fixed length: start point = wherever the paper rests
-    `^FO0,14^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
-    barcodeZpl(52, it.barcode, 80),
-    p.price ? `^FO0,164^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
-    p.pkg   ? `^FO0,230^A0N,26,26^FB${PW},1,0,C^FD${p.pkg}^FS` : '',
+    `^FO0,38^A0N,30,28^FB${PW},1,0,C^FD${p.name}^FS`,
+    barcodeZpl(76, it.barcode, 80),
+    p.price ? `^FO0,188^A0N,${p.PS},${p.PS}^FB${PW},1,0,C^FD${p.price}^FS` : '',
+    p.pkg   ? `^FO0,254^A0N,26,26^FB${PW},1,0,C^FD${p.pkg}^FS` : '',
     `^PQ${it.qty}`,                                // qty copies, printed by the printer itself
     '^XZ'
   ].filter(Boolean).join('\n');
@@ -368,10 +368,10 @@ function wrap2(s, chars){
 function stickerSvg(it){
   const p = labelParts(it), C = PW / 2, bv = esc(it.barcode);
   let g = '';
-  if (p.name)  g += '<text x="' + C + '" y="40" font-size="30" text-anchor="middle">' + escHtml(p.name) + '</text>';
-  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 52, 80);
-  if (p.price) g += '<text x="' + C + '" y="' + (164 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
-  if (p.pkg)   g += '<text x="' + C + '" y="252" font-size="26" text-anchor="middle">' + escHtml(p.pkg) + '</text>';
+  if (p.name)  g += '<text x="' + C + '" y="64" font-size="30" text-anchor="middle">' + escHtml(p.name) + '</text>';
+  if (bv)      g += barsSvg(bv, Math.max(16, Math.round((PW - barWidth(bv)) / 2)), 76, 80);
+  if (p.price) g += '<text x="' + C + '" y="' + (188 + p.PS * 0.85) + '" font-size="' + p.PS + '" font-weight="700" text-anchor="middle">' + escHtml(p.price) + '</text>';
+  if (p.pkg)   g += '<text x="' + C + '" y="276" font-size="26" text-anchor="middle">' + escHtml(p.pkg) + '</text>';
   return '<svg viewBox="0 0 ' + PW + ' ' + LL + '" xmlns="http://www.w3.org/2000/svg" fill="#111" font-family="system-ui,Arial,sans-serif">'
        + '<rect x="0.5" y="0.5" width="' + (PW-1) + '" height="' + (LL-1) + '" fill="#fff" stroke="#d0d3d8"/>'
        + g + '</svg>';
@@ -557,8 +557,8 @@ $('btnGap').onclick = async () => {
              + '~TA000\r\n'
              + '! U1 do "device.calibrate" ""\r\n');
     await new Promise(r => setTimeout(r, 2000));
-    MEDIA = 'gap'; TEAR = 0;
-    try { localStorage.setItem('zq320.media', 'gap'); localStorage.setItem('zq320.tear', '0'); } catch (e){}
+    MEDIA = 'gap'; TEAR = 32;
+    try { localStorage.setItem('zq320.media', 'gap'); localStorage.setItem('zq320.tear', '32'); } catch (e){}
     showNudge(); release();
     setStatus('Gap sensing on — print 2 stickers to check', 'ok');
   } catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); release(); }
