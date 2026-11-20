@@ -606,7 +606,9 @@ $('btnPrint').onclick = () => {
     const bytes = new TextEncoder().encode(z);
     let s = ''; for (const b of bytes) s += String.fromCharCode(b);
     setStatus('Sending ' + z.length + ' bytes to RawBT...', 'busy');
-    location.href = 'rawbt:base64,' + btoa(s);
+    /* Android intent link, as RawBT documents for Chrome. The plain rawbt: link printed once
+       and then Chrome silently blocked repeat launches (20 Nov). */
+    location.href = 'intent:base64,' + btoa(s) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
   } catch (e) { setStatus('RawBT: ' + (e.message || e), 'bad'); }
 };
 
