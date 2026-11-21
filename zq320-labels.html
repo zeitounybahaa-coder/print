@@ -83,9 +83,10 @@
     <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
     <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
     <div class="tools">
-      <button class="ghost" id="btnGap">Set up gap sensing (once)</button>
+      <!-- Gap sensing + calibrate hidden 21 Nov: pressing them put the printer in gap-hunting mode -> blank labels. -->
+      <button class="ghost" id="btnGap" hidden>Set up gap sensing (once)</button>
       <button class="ghost" id="btnLen">Back to fixed length</button>
-      <button class="ghost" id="btnCal">Calibrate printer</button>
+      <button class="ghost" id="btnCal" hidden>Calibrate printer</button>
       <button class="ghost" id="btnDiag">Inspect printer services</button>
       <button class="ghost" id="btnZpl">Show ZPL</button>
       <button class="ghost" id="btnCopy">Copy ZPL</button>
