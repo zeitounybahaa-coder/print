@@ -455,7 +455,13 @@ async function connect(){
     try {
       const known = await navigator.bluetooth.getDevices();
       const saved = localStorage.getItem('zq320.id');
-      device = known.find(d => d.id === saved) || null;
+      /* The saved id can be stale (ids were temporary before the Chrome flag was enabled), which
+         forced the scan list — and a printer this phone already holds (solid blue LED) never
+         shows in a scan. So fall back to any remembered Zebra, or the only remembered device. */
+      device = known.find(d => d.id === saved)
+            || known.find(d => /^(XX|ZQ)/i.test(d.name || ''))
+            || (known.length === 1 ? known[0] : null);
+      if (device) { try { localStorage.setItem('zq320.id', device.id); } catch (e){} }
     } catch(e){ /* permissions backend not enabled — fall through to the chooser */ }
   }
 
