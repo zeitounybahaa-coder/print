@@ -152,7 +152,16 @@ const $ = id => document.getElementById(id);
    printer and by how the roll is seated, so it cannot be computed here. These two nudges
    move the whole label via ^LH, 1 mm per tap, and stick per device. */
 let MEDIA = 'length';          // 'gap' once the printer's gap sensor is set up, else fixed length
-try { MEDIA = localStorage.getItem('zq320.media') || 'length'; } catch (e){}   // gap sensing fed blank labels on this ZQ320 (22 Sep, 19 Nov x2)
+/* Always fixed length unless the URL explicitly asks for ?media=gap. Phones that pressed
+   "Set up gap sensing" on 19 Nov remembered 'gap' and fed strings of blank labels (21 Nov).
+   Clear that memory and put Tear back to 12 mm. */
+try {
+  if (localStorage.getItem('zq320.media') === 'gap') {
+    localStorage.setItem('zq320.media', 'length');
+    localStorage.setItem('zq320.tear', '96');
+  }
+} catch (e){}
+MEDIA = (qs.get('media') === 'gap') ? 'gap' : 'length';
 let OX = 0, OY = 0, TEAR = 96;   // 12 mm tear-off feed in fixed-length mode   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
 try {
   OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
