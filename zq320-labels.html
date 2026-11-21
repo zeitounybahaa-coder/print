@@ -283,7 +283,7 @@ function labelZpl(it){
        ^LL320 made each format run over the gap and the printer lost the edge and fed
        blank labels (19 Nov). The printer uses the length it measured at calibration.
        ^ML360 (45 mm) caps any gap hunt to about one label. */
-    MEDIA === 'gap' ? '^MNY^ML360^MMT'            // printer finds each label edge itself
+    MEDIA === 'gap' ? '^MNY^MMT'                 // printer finds each label edge itself
                     : `^MNN^LL${LLP}^MMT`,        // fixed length: start point = wherever the paper rests
     /* y 30-84 name (1-2 lines) · y 92-178 barcode + digits · y 186-250 price · y 254-280 carton */
     ...p.lines.map((l, i) => `^FO0,${(p.lines.length === 1 ? 44 : 30) + i * 28}^A0N,26,26^FB${PW},1,0,C^FD${l}^FS`),
@@ -576,12 +576,16 @@ $('btnGap').onclick = async () => {
   try {
     setStatus('Fixing gaps… printer will feed 2–3 labels', 'busy');
     await connect();
+    /* Zebra's own ZQ310/ZQ320 gap procedure (support article 000014196): media.type label,
+       media.sense_mode gap, then ~JC (ZPL label-length calibration) and ^JUS to SAVE it.
+       Earlier attempts used device.calibrate and never saved; ^SS is ignored by this printer. */
     await send('! U1 setvar "media.type" "label"\r\n'
              + '! U1 setvar "media.sense_mode" "gap"\r\n'
-             + '! U1 setvar "ezpl.media_type" "web"\r\n'
-             + '! U1 do "device.calibrate" ""\r\n');
-    await new Promise(r => setTimeout(r, 7000));          // let the calibration feed finish
-    await send('^XA^SS002,015,,320^XZ\r\n~TA032\r\n');     // threshold mid-way, 4 mm tear
+             + '! U1 setvar "ezpl.media_type" "web"\r\n');
+    await new Promise(r => setTimeout(r, 1500));
+    await send('~JC^XA^JUS^XZ\r\n');
+    await new Promise(r => setTimeout(r, 8000));          // let the calibration feed finish
+    await send('~TA032\r\n');                            // 4 mm tear
     await new Promise(r => setTimeout(r, 2000));
     MEDIA = 'gap'; TEAR = 32; GAPFIX = true;
     try { localStorage.setItem('zq320.gapfixed', '1'); localStorage.setItem('zq320.tear', '32'); } catch (e){}
