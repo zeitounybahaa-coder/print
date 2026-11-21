@@ -83,7 +83,7 @@
     <label class="f">Zebra BLE service UUID (only change if the printer isn't found)</label>
     <input type="text" id="svc" value="38eb4a80-c570-11e3-9507-0002a5d5c51b">
     <div class="tools">
-            <button class="ghost" id="btnGap">Set up gap sensing (once)</button>
+            <button class="ghost" id="btnGap">Fix gaps</button>
       <button class="ghost" id="btnLen">Back to fixed length</button>
       <button class="ghost" id="btnCal">Calibrate printer</button>
       <button class="ghost" id="btnSensor">Print sensor test</button>
@@ -162,7 +162,8 @@ try {
     localStorage.setItem('zq320.tear', '96');
   }
 } catch (e){}
-MEDIA = (qs.get('media') === 'gap') ? 'gap' : 'length';
+let GAPFIX = false; try { GAPFIX = localStorage.getItem('zq320.gapfixed') === '1'; } catch (e){}
+MEDIA = (qs.get('media') === 'gap' || GAPFIX) ? 'gap' : 'length';   // gap only after 'Fix gaps' has run on this phone
 let OX = 0, OY = 0, TEAR = 96;   // 12 mm tear-off feed in fixed-length mode   // TEAR: dots fed past the last label so it clears the tear bar (~TA, max 120)
 try {
   OX = parseInt(localStorage.getItem('zq320.ox') || '0', 10) || 0;
@@ -565,20 +566,26 @@ $('btnDiag').onclick = async () => {
 /* One-time: tell the ZQ320 it has gapped labels and let it measure them. After this
    every sticker starts at the real label edge, so nothing creeps into the gap and
    the gap — not the middle of a label — stops at the tear bar. Stored in the printer. */
+/* "Fix gaps" (21 Nov). The sensor graph showed: label ~15-20, gap ~0, but the printer's
+   threshold sat at ~20 — on top of the label level — so it lost count and fed blanks.
+   Steps: gap mode + calibrate, then override the sensor levels with ^SS so the threshold
+   lands mid-way (~8): web/gap value 2, media/label value 15, label length 320 dots.
+   ^SS on the ZQ320 is not confirmed — check with "Print sensor test" afterwards. */
 $('btnGap').onclick = async () => {
   try {
-    setStatus('Setting up gap sensing… printer will feed 2–3 labels', 'busy');
+    setStatus('Fixing gaps… printer will feed 2–3 labels', 'busy');
     await connect();
     await send('! U1 setvar "media.type" "label"\r\n'
              + '! U1 setvar "media.sense_mode" "gap"\r\n'
              + '! U1 setvar "ezpl.media_type" "web"\r\n'
-             + '~TA000\r\n'
              + '! U1 do "device.calibrate" ""\r\n');
+    await new Promise(r => setTimeout(r, 7000));          // let the calibration feed finish
+    await send('^XA^SS002,015,,320^XZ\r\n~TA032\r\n');     // threshold mid-way, 4 mm tear
     await new Promise(r => setTimeout(r, 2000));
-    MEDIA = 'gap'; TEAR = 32;
-    try { localStorage.setItem('zq320.media', 'gap'); localStorage.setItem('zq320.tear', '32'); } catch (e){}
+    MEDIA = 'gap'; TEAR = 32; GAPFIX = true;
+    try { localStorage.setItem('zq320.gapfixed', '1'); localStorage.setItem('zq320.tear', '32'); } catch (e){}
     showNudge(); release();
-    setStatus('Gap sensing on — print 2 stickers to check', 'ok');
+    setStatus('Gaps fixed — print sensor test, then 5 stickers', 'ok');
   } catch (e){ setStatus(e.message || String(e), 'bad'); say('ERROR: ' + (e.message || e)); release(); }
 };
 /* Undo gap sensing in the printer too, so the feed button and power-up stop hunting for gaps. */
@@ -590,8 +597,8 @@ $('btnLen').onclick = async () => {
     await new Promise(r => setTimeout(r, 1500));
     release();
   } catch (e){ say('ERROR: ' + (e.message || e)); release(); }
-  MEDIA = 'length'; TEAR = 96;
-  try { localStorage.setItem('zq320.media', 'length'); localStorage.setItem('zq320.tear', '96'); } catch (e){}
+  MEDIA = 'length'; TEAR = 96; GAPFIX = false;
+  try { localStorage.setItem('zq320.media', 'length'); localStorage.removeItem('zq320.gapfixed'); localStorage.setItem('zq320.tear', '96'); } catch (e){}
   showNudge(); setStatus('Fixed length on (40 mm per sticker)', 'ok');
 };
 
