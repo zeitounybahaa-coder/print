@@ -581,7 +581,8 @@ $('btnGap').onclick = async () => {
        Earlier attempts used device.calibrate and never saved; ^SS is ignored by this printer. */
     await send('! U1 setvar "media.type" "label"\r\n'
              + '! U1 setvar "media.sense_mode" "gap"\r\n'
-             + '! U1 setvar "ezpl.media_type" "web"\r\n');
+             + '! U1 setvar "ezpl.media_type" "gap/notch"\r\n'      // documented value; "web" was likely rejected
+             + '! U1 setvar "ezpl.label_length_max" "2"\r\n');    // inches: cap any gap hunt at ~1 label
     await new Promise(r => setTimeout(r, 1500));
     await send('~JC^XA^JUS^XZ\r\n');
     await new Promise(r => setTimeout(r, 8000));          // let the calibration feed finish
