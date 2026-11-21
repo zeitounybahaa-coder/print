@@ -87,6 +87,7 @@
       <button class="ghost" id="btnLen">Back to fixed length</button>
       <button class="ghost" id="btnCal">Calibrate printer</button>
       <button class="ghost" id="btnSensor">Print sensor test</button>
+      <button class="ghost" id="btnVisible">Make printer visible (via RawBT)</button>
       <button class="ghost" id="btnDiag">Inspect printer services</button>
       <button class="ghost" id="btnZpl">Show ZPL</button>
       <button class="ghost" id="btnCopy">Copy ZPL</button>
@@ -600,6 +601,18 @@ $('btnLen').onclick = async () => {
   MEDIA = 'length'; TEAR = 96; GAPFIX = false;
   try { localStorage.setItem('zq320.media', 'length'); localStorage.removeItem('zq320.gapfixed'); localStorage.setItem('zq320.tear', '96'); } catch (e){}
   showNudge(); setStatus('Fixed length on (40 mm per sticker)', 'ok');
+};
+
+/* Make printer visible (21 Nov). Chrome only finds the printer over Bluetooth Low Energy
+   while it is discoverable. Sent through RawBT (classic link) because Chrome can't reach
+   the printer yet. Takes effect after the printer is turned off and on. */
+$('btnVisible').onclick = () => {
+  const cmd = '! U1 setvar "bluetooth.discoverable" "on"\r\n'
+            + '! U1 setvar "bluetooth.le.controller_mode" "both"\r\n'
+            + '! U1 setvar "bluetooth.enable" "on"\r\n';
+  let s = ''; for (const b of new TextEncoder().encode(cmd)) s += String.fromCharCode(b);
+  setStatus('Sending visibility settings to RawBT… then turn the printer off and on', 'busy');
+  location.href = 'intent:base64,' + btoa(s) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
 };
 
 /* Sensor test (~JG): the printer prints a graph of what its media sensor sees over a few
